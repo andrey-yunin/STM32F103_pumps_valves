@@ -29,6 +29,8 @@
 #include "task_tmc2209_manager.h"
 #include "app_config.h"
 #include "command_protocol.h"
+#include "tmc2209_driver.h" // Для типа TMC2209_Handle_t
+
 
 
 /* USER CODE END Includes */
@@ -95,6 +97,9 @@ osMessageQueueId_t parser_queueHandle;
 osMessageQueueId_t motion_queueHandle;
 osMessageQueueId_t tmc_manager_queueHandle;
 
+// Массив хэндлов для 8-ми драйверов TMC2209
+TMC2209_Handle_t tmc_drivers[MOTOR_COUNT];
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -157,11 +162,12 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   // Создание очередей FreeRTOS с использованием именованных констант
-can_rx_queueHandle = osMessageQueueNew(CAN_RX_QUEUE_LEN, CAN_DATA_MAX_LEN, NULL); // CAN-фрейм: 8 байт данных
+can_rx_queueHandle = osMessageQueueNew(CAN_RX_QUEUE_LEN, sizeof(CanRxFrame_t), NULL); // CAN-фрейм: на прием
+can_tx_queueHandle = osMessageQueueNew(CAN_TX_QUEUE_LEN, sizeof(CanTxFrame_t), NULL); // CAN-фрейм на отправку
 parser_queueHandle = osMessageQueueNew(PARSER_QUEUE_LEN, sizeof(CAN_Command_t), NULL); // Структура команды
 motion_queueHandle = osMessageQueueNew(MOTION_QUEUE_LEN, sizeof(MotionCommand_t), NULL); // Задание на движение
 tmc_manager_queueHandle = osMessageQueueNew(TMC_MANAGER_QUEUE_LEN, sizeof(CAN_Command_t), NULL); // Команда TMC (пока используем CAN_Command_t)
-can_tx_queueHandle = osMessageQueueNew(CAN_TX_QUEUE_LEN, CAN_DATA_MAX_LEN, NULL); // CAN-фрейм на отправку
+
 
 // Проверка успешности создания очередей
 if (can_rx_queueHandle == NULL || parser_queueHandle == NULL || motion_queueHandle == NULL || tmc_manager_queueHandle == NULL || can_tx_queueHandle == NULL) {

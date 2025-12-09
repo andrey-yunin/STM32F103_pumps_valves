@@ -129,23 +129,93 @@ if (rx_buf[0] != TMC2209_UART_SYNC_BYTE ||
 return HAL_OK;
    }
 
-// TODO: Реализовать эти функции
+/**
+ * @brief Устанавливает ток удержания (hold) и рабочий ток (run) для драйвера TMC2209.
+ * @param htmc Указатель на структуру TMC2209_Handle_t.
+ * @param run_current_percent Процент от максимального тока для рабочего режима (1-100%).
+ * @param hold_current_percent Процент от максимального тока для режима удержания (0-100%).
+ * @retval HAL_StatusTypeDef HAL_OK если успешно, иначе код ошибки.
+ */
+
 HAL_StatusTypeDef TMC2209_SetMotorCurrent(TMC2209_Handle_t* htmc, uint8_t run_current_percent, uint8_t hold_current_percent) {
-// В этом месте нужно будет рассчитать значения для регистров IHOLD_IRUN
-// исходя из процентов и референсного напряжения Vref.
-// Пока оставим заглушку.
-(void)htmc;
-(void)run_current_percent;
-(void)hold_current_percent;
-return HAL_ERROR; // Пока не реализовано
+	if (htmc == NULL || run_current_percent == 0 || run_current_percent > 100 || hold_current_percent > 100) {
+		return HAL_ERROR;
+		}
+
+	// Рекомендуемые значения для IHOLD и IRUN
+	// IHOLD = 0..31 (ток удержания)
+	// IRUN = 0..31 (рабочий ток)
+	// TPOWERDOWN = 0..255 (задержка перед снижением тока до IHOLD)
+	// Значение 31 соответствует ~99% от максимального тока, 1 - ~32%
+	// Ток вычисляется: Current_RMS = (IRUN+1)/32 * (Vsense/R_Sense) / 1.41
+	// Мы упрощаем и просто масштабируем 0-31 на 0-100%.
+
+	uint8_t ihold = (uint8_t)((float)hold_current_percent / 100.0f * 31.0f);
+	uint8_t irun = (uint8_t)((float)run_current_percent / 100.0f * 31.0f);
+	uint8_t tpowerdown = 10; // 1 секунда (10*100мс) - время, через которое ток снижается до IHOLD после остановки
+
+	// Регистр IHOLD_IRUN: TPOWERDOWN:24, IHOLD:16, IRUN:8, TSTRT:0
+	uint32_t value = ((uint32_t)tpowerdown << 24) | ((uint32_t)ihold << 16) | ((uint32_t)irun << 8) | (0x4 << 0); // TSTRT=4
+
+	return TMC2209_WriteRegister(htmc, TMC2209_IHOLD_IRUN, value);
+
 }
 
+/**
+ * @brief Устанавливает разрешение микрошага для драйвера TMC2209.
+ * @param htmc Указатель на структуру TMC2209_Handle_t.
+ * @param microsteps Количество микрошагов (1, 2, 4, 8, 16, 32, 64, 128, 256).
+ * @retval HAL_StatusTypeDef HAL_OK если успешно, иначе код ошибки.
+ */
+
 HAL_StatusTypeDef TMC2209_SetMicrosteps(TMC2209_Handle_t* htmc, uint16_t microsteps) {
-// Здесь нужно будет записать соответствующее значение в регистр CHOPCONF.
-// Например, 256 микрошагов - 0x00, 128 - 0x01, 64 - 0x02 и т.д. (см. даташит)
-(void)htmc;
-(void)microsteps;
-return HAL_ERROR; // Пока не реализовано
+	if (htmc == NULL) {
+		return HAL_ERROR;
+		}
+	// MRES - Microstep Resolution
+	// 0: 256 microsteps (default)
+	// 1: 128 microsteps
+	// 2: 64 microsteps
+	// 3: 32 microsteps
+	// 4: 16 microsteps
+	// 5: 8 microsteps
+	// 6: 4 microsteps
+	// 7: 2 microsteps
+	// 8: Fullstep
+
+	uint32_t mres_val = 0; // По умолчанию 256
+	switch (microsteps) {
+         case 256: mres_val = 0; break;
+         case 128: mres_val = 1; break;
+	     case 64:  mres_val = 2; break;
+	     case 32:  mres_val = 3; break;
+	     case 16:  mres_val = 4; break;
+	     case 8:   mres_val = 5; break;
+	     case 4:   mres_val = 6; break;
+	     case 2:   mres_val = 7; break;
+	     case 1:   mres_val = 8; break;
+	     default: return HAL_ERROR; // Неподдерживаемое значение микрошага
+	}
+
+
+	// Регистр CHOPCONF. Нам нужен только бит MRES (биты 24-27).
+	// Сначала читаем текущее значение регистра, чтобы не перезаписать другие настройки
+	uint32_t chopconf_reg;
+	if (TMC2209_ReadRegister(htmc, TMC2209_CHOPCONF, &chopconf_reg) != HAL_OK) {
+		// Если не удалось прочитать, попробуем записать напрямую (может быть, регистр сброшен)
+	    chopconf_reg = 0; // Или дефолтное значение
+	    }
+
+	    // Очищаем биты MRES и устанавливаем новое значение
+	   chopconf_reg &= ~((uint32_t)0xF << 24); // Очистка MRES (биты 24-27)
+	   chopconf_reg |= (mres_val << 24);
+
+	   return TMC2209_WriteRegister(htmc, TMC2209_CHOPCONF, chopconf_reg);
+
+
+
+
+
 }
 
 HAL_StatusTypeDef TMC2209_SetSpreadCycle(TMC2209_Handle_t* htmc, uint8_t enable) {

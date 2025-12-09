@@ -52,6 +52,21 @@ typedef struct {
     } MotionCommand_t;
 
 
+// Структура для хранения полного Rx CAN-фрейма (header + data)
+typedef struct {
+	CAN_RxHeaderTypeDef header;
+    uint8_t data[CAN_DATA_MAX_LEN];
+    } CanRxFrame_t;
+
+    // Структура для хранения полного Tx CAN-фрейма (header + data)
+typedef struct {
+	CAN_TxHeaderTypeDef header;
+	uint8_t data[CAN_DATA_MAX_LEN];
+    } CanTxFrame_t;
+
+
+
+
 #endif // APP_CONFIG_H
 
 

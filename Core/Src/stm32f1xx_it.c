@@ -22,6 +22,12 @@
 #include "stm32f1xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "main.h"
+#include "cmsis_os.h"
+#include "app_queues.h" // Для can_rx_queueHandle
+#include "app_config.h" // Чтобы видеть CanFrame_t
+
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +48,8 @@
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
 
+// extern osMessageQueueId_t can_rx_queueHandle; // Уже объявлен extern в app_queues.h
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -55,6 +63,7 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern CAN_HandleTypeDef hcan;
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim4;
 
@@ -161,6 +170,20 @@ void DebugMon_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles CAN RX1 interrupt.
+  */
+void CAN1_RX1_IRQHandler(void)
+{
+ /* USER CODE BEGIN CAN1_RX1_IRQn 0 */
+
+  /* USER CODE END CAN1_RX1_IRQn 0 */
+  HAL_CAN_IRQHandler(&hcan);
+  /* USER CODE BEGIN CAN1_RX1_IRQn 1 */
+
+  /* USER CODE END CAN1_RX1_IRQn 1 */
+}
+
+/**
   * @brief This function handles TIM2 global interrupt.
   */
 void TIM2_IRQHandler(void)
@@ -189,5 +212,16 @@ void TIM4_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+// Callback-функция, вызываемая, когда в FIFO0 CAN1 появляется новое сообщение
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+	CanRxFrame_t rx_frame;
+	// Извлекаем сообщение из аппаратного буфера CAN FIFO0
+	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_frame.header, rx_frame.data) == HAL_OK)
+		{
+		// Помещаем весь фрейм в очередь can_rx_queue для обработки
+		osMessageQueuePut(can_rx_queueHandle, &rx_frame, 0, 0); // priority 0, timeout 0 (немедленно)
+		}
+}
 
 /* USER CODE END 1 */

@@ -6,34 +6,82 @@
  */
 
 #include "task_command_parser.h"
-#include "main.h"         // Для HAL-функций и типов
-#include "cmsis_os.h"     // Для osDelay, osMessageQueueId_t и т.д.
-#include "command_protocol.h" // Для CAN_Command_t и CommandID_t
+#include "main.h"             // Для HAL-функций
+#include "cmsis_os.h"         // Для osDelay, osMessageQueueXxx
+#include "command_protocol.h" // Для CAN_Command_t, CommandID_t
+#include "app_queues.h"       // Для хэндлов очередей
+#include "app_config.h"       // Для MotionCommand_t
 
-// В будущем здесь будут объявления очередей
-// extern osMessageQueueId_t parser_queueHandle;
-// extern osMessageQueueId_t motion_queueHandle;
-// extern osMessageQueueId_t tmc_manager_queueHandle;
-// extern osMessageQueueId_t can_tx_queueHandle; // Для отправки ответов
+// --- Внешние хэндлы HAL ---
+// extern CAN_HandleTypeDef hcan; // Не нужен напрямую в этой задаче, так как Task_CAN_Handler уже обработал
+
+// --- Глобальная переменная для хранения ID исполнителя ---
+// Пока просто заглушка, в будущем будет читаться из Flash
+uint8_t g_performer_id = 0xFF; // 0xFF означает, что ID еще не установлен
+
 
 
 void app_start_task_command_parser(void *argument)
 {
-	// Структура для хранения принятой команды
-    // CAN_Command_t received_command;
+	CAN_Command_t received_command; // Буфер для принятой команды
+	MotionCommand_t motion_cmd;     // Буфер для команды движения
 
-    // Бесконечный цикл задачи
-  for(;;)
-  {
-	  // 1. Ждать сообщение в очереди parser_queue (от Task_CAN_Handler)
-      // 2. Забрать сообщение (например, структуру CAN_Command_t)
-      // 3. Распарсить команду (CommandID_t)
-      // 4. В зависимости от типа команды:
-      //    - Если это команда движения, положить её в motion_queue для Task_Motion_Controller
-      //    - Если это команда для TMC-драйвера, положить её в tmc_manager_queue для Task_TMC_Manager
-      //    - Если это запрос статуса, получить статус и положить ответ в can_tx_queue
+	// --- Логика определения ID исполнителя (пока заглушка) ---
+	// В будущем здесь будет чтение ID из Flash
+	g_performer_id = 0; // Для тестирования, примем, что наш ID = 0
 
-    osDelay(1);
-  }
 
+	// Бесконечный цикл задачи
+	for(;;)
+		{
+		// 1. Ждем команду из очереди parser_queue
+	    if (osMessageQueueGet(parser_queueHandle, &received_command, NULL, osWaitForever) == osOK)
+	    	{
+	    	// --- 2. Фильтрация по Performer ID ---
+	        // Если команда адресована конкретному исполнителю, а не всем
+	        // (Motor_ID 0xFF означает широковещательную команду)
+	        if (received_command.motor_id != 0xFF && (received_command.motor_id >> 3) != g_performer_id) {
+	        	// Это не наша команда, игнорируем
+	        	continue;
+	        	}
+	        // --- 3. Обработка команды ---
+	        switch (received_command.command_id)
+	        {
+	             case CMD_MOVE_ABSOLUTE:
+	             case CMD_MOVE_RELATIVE:
+	             case CMD_SET_SPEED:
+	             case CMD_SET_ACCELERATION:
+	             case CMD_STOP:
+	            	 // Команды движения - отправляем в очередь Task_Motion_Controller
+	            	 motion_cmd.motor_id = received_command.motor_id;
+	                 motion_cmd.steps = received_command.payload; // Или что-то другое
+	                 // ... заполнить остальные поля motion_cmd ...
+	                 osMessageQueuePut(motion_queueHandle, &motion_cmd, 0, 0);
+	                 break;
+
+	             case CMD_GET_STATUS:
+	             case CMD_SET_CURRENT:
+	             case CMD_ENABLE_MOTOR:
+	            	 // Команды для TMC-драйверов - отправляем в очередь Task_TMC_Manager
+	            	 // Пока передадим CAN_Command_t напрямую
+	            	 osMessageQueuePut(tmc_manager_queueHandle, &received_command, 0, 0);
+	                 break;
+
+	             case CMD_PERFORMER_ID_SET:
+	            	 // Команда установки ID исполнителя (для провизионинга)
+	            	 // (received_command.payload будет содержать новый ID)
+	            	 // В будущем здесь будет логика записи в Flash и перезагрузки
+	            	 g_performer_id = (uint8_t)received_command.payload;
+	            	 // ... отправить подтверждение через can_tx_queue ...
+	                 break;
+
+	              default:
+	                 // Неизвестная команда
+	                 // ... Отправить ошибку через can_tx_queue ...
+	              break;
+	         }
+
+	     }
+	    osDelay(1); // Небольшая задержка, чтобы не нагружать процессор без надобности
+	   }
 }

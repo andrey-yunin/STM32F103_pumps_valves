@@ -9,25 +9,46 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "tmc2209_driver.h" // Для TMC2209_Handle_t
+#include "app_config.h" // Для MOTOR_COUNT
+#include "app_queues.h"
 
-// В будущем здесь будут объявления очередей и глобальных переменных
+// В будущем здесь будут объявления глобальных переменных
 // extern osMessageQueueId_t tmc_manager_queueHandle;
 // extern TMC2209_Handle_t tmc_drivers[8]; // Массив хэндлов для 8 драйверов
 
+
+// Внешние переменные, объявленные в main.c
+extern TMC2209_Handle_t tmc_drivers[MOTOR_COUNT];
+extern UART_HandleTypeDef huart1; // Хэндл UART1
+extern UART_HandleTypeDef huart2; // Хэндл UART2
+
+
 void app_start_task_tmc2209_manager(void *argument)
 {
-	// Инициализация драйверов TMC2209 при старте системы
-	// В будущем, возможно, будет цикл по motor_id
-	// for(int i=0; i<8; i++) {
-	//   TMC2209_Init(&tmc_drivers[i], &huart1, i % 4); // Пример
-	//   TMC2209_SetMotorCurrent(&tmc_drivers[i], 80, 50); // Пример: 80% run, 50% hold
-	//   TMC2209_SetMicrosteps(&tmc_drivers[i], 16);
-	// }
+	 // Ждем небольшую паузу, чтобы все остальные части системы успели запуститься
+	 osDelay(100);
+
+	 // --- Инициализация всех 8-ми драйверов ---
+	 for (uint8_t i = 0; i < MOTOR_COUNT; i++)
+		 {
+		 UART_HandleTypeDef* huart_ptr = (i < 4) ? &huart1 : &huart2; // Моторы 0-3 на UART1, 4-7 на UART2
+	     uint8_t slave_addr = i % 4; // Адрес на шине (0, 1, 2, 3)
+
+	     TMC2209_Init(&tmc_drivers[i], huart_ptr, slave_addr);
+
+	     // Здесь мы будем вызывать функции настройки.
+	     // Пока они не реализованы в tmc2209_driver.c,
+	     // они будут возвращать ошибку, но это нормально.
+	     // TMC2209_SetMotorCurrent(&tmc_drivers[i], 80, 50);
+	     // TMC2209_SetMicrosteps(&tmc_drivers[i], 16);
+
+		 }
+
 
 	// Бесконечный цикл задачи
 
 	for(;;)
 		{
-		osDelay(1);
+		osDelay(1000);
 		}
 }
