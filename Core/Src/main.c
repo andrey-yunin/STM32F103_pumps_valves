@@ -27,7 +27,8 @@
 #include "task_command_parser.h"
 #include "task_motion_controller.h"
 #include "task_tmc2209_manager.h"
-
+#include "app_config.h"
+#include "command_protocol.h"
 
 
 /* USER CODE END Includes */
@@ -88,6 +89,12 @@ const osThreadAttr_t task_tmc2209_ma_attributes = {
 };
 /* USER CODE BEGIN PV */
 
+osMessageQueueId_t can_rx_queueHandle;
+osMessageQueueId_t can_tx_queueHandle;
+osMessageQueueId_t parser_queueHandle;
+osMessageQueueId_t motion_queueHandle;
+osMessageQueueId_t tmc_manager_queueHandle;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -99,7 +106,7 @@ static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
-void start_task_can_handle(void *argument);
+void start_task_can_handler(void *argument);
 void start_task_command_parser(void *argument);
 void start_task_motion_controller(void *argument);
 void start_task_tmc2209_manager(void *argument);
@@ -149,6 +156,18 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  // Создание очередей FreeRTOS с использованием именованных констант
+can_rx_queueHandle = osMessageQueueNew(CAN_RX_QUEUE_LEN, CAN_DATA_MAX_LEN, NULL); // CAN-фрейм: 8 байт данных
+parser_queueHandle = osMessageQueueNew(PARSER_QUEUE_LEN, sizeof(CAN_Command_t), NULL); // Структура команды
+motion_queueHandle = osMessageQueueNew(MOTION_QUEUE_LEN, sizeof(MotionCommand_t), NULL); // Задание на движение
+tmc_manager_queueHandle = osMessageQueueNew(TMC_MANAGER_QUEUE_LEN, sizeof(CAN_Command_t), NULL); // Команда TMC (пока используем CAN_Command_t)
+can_tx_queueHandle = osMessageQueueNew(CAN_TX_QUEUE_LEN, CAN_DATA_MAX_LEN, NULL); // CAN-фрейм на отправку
+
+// Проверка успешности создания очередей
+if (can_rx_queueHandle == NULL || parser_queueHandle == NULL || motion_queueHandle == NULL || tmc_manager_queueHandle == NULL || can_tx_queueHandle == NULL) {
+	Error_Handler();
+    }
+
 
   /* USER CODE END 2 */
 
@@ -173,7 +192,7 @@ int main(void)
 
   /* Create the thread(s) */
   /* creation of task_can_handle */
-  task_can_handleHandle = osThreadNew(start_task_can_handle, NULL, &task_can_handle_attributes);
+  task_can_handleHandle = osThreadNew(start_task_can_handler, NULL, &task_can_handle_attributes);
 
   /* creation of task_command_pa */
   task_command_paHandle = osThreadNew(start_task_command_parser, NULL, &task_command_pa_attributes);
@@ -576,16 +595,17 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_start_task_can_handle */
+/* USER CODE BEGIN Header_start_task_can_handler */
 /**
   * @brief  Function implementing the task_can_handle thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_start_task_can_handle */
-void start_task_can_handle(void *argument)
+/* USER CODE END Header_start_task_can_handler */
+void start_task_can_handler(void *argument)
 {
   /* USER CODE BEGIN 5 */
+  app_start_task_can_handler(argument);
   /* Infinite loop */
   for(;;)
   {
@@ -604,6 +624,7 @@ void start_task_can_handle(void *argument)
 void start_task_command_parser(void *argument)
 {
   /* USER CODE BEGIN start_task_command_parser */
+  app_start_task_command_parser(argument);
   /* Infinite loop */
   for(;;)
   {
@@ -622,6 +643,7 @@ void start_task_command_parser(void *argument)
 void start_task_motion_controller(void *argument)
 {
   /* USER CODE BEGIN start_task_motion_controller */
+  app_start_task_motion_controller(argument);
   /* Infinite loop */
   for(;;)
   {
@@ -640,6 +662,7 @@ void start_task_motion_controller(void *argument)
 void start_task_tmc2209_manager(void *argument)
 {
   /* USER CODE BEGIN start_task_tmc2209_manager */
+  app_start_task_tmc2209_manager(argument);
   /* Infinite loop */
   for(;;)
   {
