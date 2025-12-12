@@ -12,6 +12,7 @@
 #include "app_queues.h"       // Для хэндлов очередей
 #include "app_config.h"       // Для MotionCommand_t
 #include "app_globals.h"
+#include "pumps_valves_gpio.h"
 
 
 
@@ -44,6 +45,50 @@ void app_start_task_dispatcher(void *argument)
 		 	        	 //Здесь будет логика для насосов и клапанов
 
 		 	         break;
+
+
+		 	        // >>> НАЧАЛО ДОБАВЛЕННЫХ КОМАНД ДЛЯ НАСОСОВ И КЛАПАНОВ <<<
+		 	         case CMD_SET_PUMP_STATE:
+		 	        	 {
+		 	        		 // Payload: Bit 0 = State (1=ON, 0=OFF), Bits 7-1 = Pump ID
+		 	        		 // Мы используем received_command.motor_id как ID насоса.
+		 	        		 uint8_t pump_id = received_command.motor_id;
+		 	        		 // Payload содержит состояние: любое ненулевое значение = ON (включить)
+		 	        		 bool state = (received_command.payload != 0);
+		 	        		 PumpsValves_SetPumpState((PumpID_t)pump_id, state);
+		 	        		 // --- Отправляем ACK (подтверждение) ---
+		 	        		 // Формируем StdId ответа: 0x200 (префикс ответа) | ID исполнителя | ID насоса
+		 	        		 tx_response_frame.header.StdId = 0x200 | (g_performer_id << 4) | pump_id;
+		 	        		 tx_response_frame.header.IDE = CAN_ID_STD;
+		 	        		 tx_response_frame.header.RTR = CAN_RTR_DATA;
+		 	        		 tx_response_frame.header.DLC = 2; // Команда + Статус
+		 	        		 tx_response_frame.data[0] = CMD_SET_PUMP_STATE; // Подтверждаем, что это ответ на CMD_SET_PUMP_STATE
+		 	        		 tx_response_frame.data[1] = (state ? 1 : 0); // Подтверждаем установленное состояние
+		 	        		 osMessageQueuePut(can_tx_queueHandle, &tx_response_frame, 0, 0);
+		 	        		 }
+		 	        	 break;
+
+		 	        	 case CMD_SET_VALVE_STATE:
+		 	        		 {
+		 	        			 // Payload: Bit 0 = State (1=OPEN, 0=CLOSE), Bits 7-1 = Valve ID
+		 	        			 // Мы используем received_command.motor_id как ID клапана.
+		 	        			 uint8_t valve_id = received_command.motor_id;
+		 	        			 // Payload содержит состояние: любое ненулевое значение = OPEN (открыть)
+		 	        			 bool state = (received_command.payload != 0);
+		 	        			 PumpsValves_SetValveState((ValveID_t)valve_id, state);
+		 	        			 // --- Отправляем ACK (подтверждение) ---
+		 	        			 // Формируем StdId ответа: 0x200 (префикс ответа) | ID исполнителя | ID клапана
+		 	        			 tx_response_frame.header.StdId = 0x200 | (g_performer_id << 4) | valve_id;
+		 	        			 tx_response_frame.header.IDE = CAN_ID_STD;
+		 	        			 tx_response_frame.header.RTR = CAN_RTR_DATA;
+		 	        			 tx_response_frame.header.DLC = 2; // Команда + Статус
+		 	        			 tx_response_frame.data[0] = CMD_SET_VALVE_STATE; // Подтверждаем, что это ответ на CMD_SET_VALVE_STATE
+		 	        			 tx_response_frame.data[1] = (state ? 1 : 0); // Подтверждаем установленное состояние
+		 	        			 osMessageQueuePut(can_tx_queueHandle, &tx_response_frame, 0, 0);
+		 	        			 }
+		 	        		 break;
+		 	        		 // <<< КОНЕЦ ДОБАВЛЕННЫХ КОМАНД >>>
+
 		 	         // --- Специальные команды ---
 		 	         case CMD_PERFORMER_ID_SET:
 		 	         // Команда установки ID исполнителя (для провизионинга)
