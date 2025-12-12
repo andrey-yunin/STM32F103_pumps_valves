@@ -101,7 +101,7 @@ void app_start_task_can_handler(void *argument)
 		                         ((int32_t)rx_frame.data[4] << 24);
 
 		 // --- Отправка распарсенной команды в parser_queue ---
-		 osMessageQueuePut(parser_queueHandle, &parsed_command, 0, 0);
+		 osMessageQueuePut(dispatcher_queueHandle, &parsed_command, 0, 0);
 		 }
 
 		 // --- 2. Обработка исходящих сообщений (TX) ---

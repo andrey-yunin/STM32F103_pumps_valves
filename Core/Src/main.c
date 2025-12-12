@@ -17,6 +17,7 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include <task_dispatcher.h>
 #include "main.h"
 #include "cmsis_os.h"
 
@@ -24,12 +25,8 @@
 /* USER CODE BEGIN Includes */
 
 #include "task_can_handler.h"
-#include "task_command_parser.h"
-#include "task_motion_controller.h"
-#include "task_tmc2209_manager.h"
 #include "app_config.h"
 #include "command_protocol.h"
-#include "tmc2209_driver.h" // Для типа TMC2209_Handle_t
 #include "app_globals.h"
 
 
@@ -54,14 +51,6 @@
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan;
 
-RTC_HandleTypeDef hrtc;
-
-TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim2;
-
-UART_HandleTypeDef huart1;
-UART_HandleTypeDef huart2;
-
 /* Definitions for task_can_handle */
 osThreadId_t task_can_handleHandle;
 const osThreadAttr_t task_can_handle_attributes = {
@@ -69,34 +58,18 @@ const osThreadAttr_t task_can_handle_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
-/* Definitions for task_command_pa */
-osThreadId_t task_command_paHandle;
-const osThreadAttr_t task_command_pa_attributes = {
-  .name = "task_command_pa",
+/* Definitions for task_dispatcher */
+osThreadId_t task_dispatcherHandle;
+const osThreadAttr_t task_dispatcher_attributes = {
+  .name = "task_dispatcher",
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for task_motion_con */
-osThreadId_t task_motion_conHandle;
-const osThreadAttr_t task_motion_con_attributes = {
-  .name = "task_motion_con",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityRealtime,
-};
-/* Definitions for task_tmc2209_ma */
-osThreadId_t task_tmc2209_maHandle;
-const osThreadAttr_t task_tmc2209_ma_attributes = {
-  .name = "task_tmc2209_ma",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* USER CODE BEGIN PV */
 
 osMessageQueueId_t can_rx_queueHandle;
 osMessageQueueId_t can_tx_queueHandle;
-osMessageQueueId_t parser_queueHandle;
-osMessageQueueId_t motion_queueHandle;
-osMessageQueueId_t tmc_manager_queueHandle;
+osMessageQueueId_t dispatcher_queueHandle;
 
 /* USER CODE END PV */
 
@@ -104,15 +77,8 @@ osMessageQueueId_t tmc_manager_queueHandle;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
-static void MX_RTC_Init(void);
-static void MX_TIM1_Init(void);
-static void MX_TIM2_Init(void);
-static void MX_USART1_UART_Init(void);
-static void MX_USART2_UART_Init(void);
 void start_task_can_handler(void *argument);
-void start_task_command_parser(void *argument);
-void start_task_motion_controller(void *argument);
-void start_task_tmc2209_manager(void *argument);
+void start_task_dispatcher(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -153,22 +119,14 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN_Init();
-  MX_RTC_Init();
-  MX_TIM1_Init();
-  MX_TIM2_Init();
-  MX_USART1_UART_Init();
-  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   // Создание очередей FreeRTOS с использованием именованных констант
 can_rx_queueHandle = osMessageQueueNew(CAN_RX_QUEUE_LEN, sizeof(CanRxFrame_t), NULL); // CAN-фрейм: на прием
 can_tx_queueHandle = osMessageQueueNew(CAN_TX_QUEUE_LEN, sizeof(CanTxFrame_t), NULL); // CAN-фрейм на отправку
-parser_queueHandle = osMessageQueueNew(PARSER_QUEUE_LEN, sizeof(CAN_Command_t), NULL); // Структура команды
-motion_queueHandle = osMessageQueueNew(MOTION_QUEUE_LEN, sizeof(MotionCommand_t), NULL); // Задание на движение
-tmc_manager_queueHandle = osMessageQueueNew(TMC_MANAGER_QUEUE_LEN, sizeof(CAN_Command_t), NULL); // Команда TMC (пока используем CAN_Command_t)
-
+dispatcher_queueHandle = osMessageQueueNew(DISPATCHER_QUEUE_LEN, sizeof(CAN_Command_t), NULL); // Структура команды
 
 // Проверка успешности создания очередей
-if (can_rx_queueHandle == NULL || parser_queueHandle == NULL || motion_queueHandle == NULL || tmc_manager_queueHandle == NULL || can_tx_queueHandle == NULL) {
+if (can_rx_queueHandle == NULL || dispatcher_queueHandle == NULL || can_tx_queueHandle == NULL) {
 	Error_Handler();
     }
 
@@ -198,14 +156,8 @@ if (can_rx_queueHandle == NULL || parser_queueHandle == NULL || motion_queueHand
   /* creation of task_can_handle */
   task_can_handleHandle = osThreadNew(start_task_can_handler, NULL, &task_can_handle_attributes);
 
-  /* creation of task_command_pa */
-  task_command_paHandle = osThreadNew(start_task_command_parser, NULL, &task_command_pa_attributes);
-
-  /* creation of task_motion_con */
-  task_motion_conHandle = osThreadNew(start_task_motion_controller, NULL, &task_motion_con_attributes);
-
-  /* creation of task_tmc2209_ma */
-  task_tmc2209_maHandle = osThreadNew(start_task_tmc2209_manager, NULL, &task_tmc2209_ma_attributes);
+  /* creation of task_dispatcher */
+  task_dispatcherHandle = osThreadNew(start_task_dispatcher, NULL, &task_dispatcher_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -239,15 +191,13 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI_DIV2;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL16;
@@ -266,12 +216,6 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_RTC;
-  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
@@ -315,234 +259,6 @@ static void MX_CAN_Init(void)
 }
 
 /**
-  * @brief RTC Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_RTC_Init(void)
-{
-
-  /* USER CODE BEGIN RTC_Init 0 */
-
-  /* USER CODE END RTC_Init 0 */
-
-  RTC_TimeTypeDef sTime = {0};
-  RTC_DateTypeDef DateToUpdate = {0};
-
-  /* USER CODE BEGIN RTC_Init 1 */
-
-  /* USER CODE END RTC_Init 1 */
-
-  /** Initialize RTC Only
-  */
-  hrtc.Instance = RTC;
-  hrtc.Init.AsynchPrediv = RTC_AUTO_1_SECOND;
-  hrtc.Init.OutPut = RTC_OUTPUTSOURCE_NONE;
-  if (HAL_RTC_Init(&hrtc) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /* USER CODE BEGIN Check_RTC_BKUP */
-
-  /* USER CODE END Check_RTC_BKUP */
-
-  /** Initialize RTC and set the Time and Date
-  */
-  sTime.Hours = 0x0;
-  sTime.Minutes = 0x0;
-  sTime.Seconds = 0x0;
-
-  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  DateToUpdate.WeekDay = RTC_WEEKDAY_MONDAY;
-  DateToUpdate.Month = RTC_MONTH_JANUARY;
-  DateToUpdate.Date = 0x1;
-  DateToUpdate.Year = 0x0;
-
-  if (HAL_RTC_SetDate(&hrtc, &DateToUpdate, RTC_FORMAT_BCD) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN RTC_Init 2 */
-
-  /* USER CODE END RTC_Init 2 */
-
-}
-
-/**
-  * @brief TIM1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM1_Init(void)
-{
-
-  /* USER CODE BEGIN TIM1_Init 0 */
-
-  /* USER CODE END TIM1_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM1_Init 1 */
-
-  /* USER CODE END TIM1_Init 1 */
-  htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
-  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
-  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM1_Init 2 */
-
-  /* USER CODE END TIM1_Init 2 */
-
-}
-
-/**
-  * @brief TIM2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM2_Init(void)
-{
-
-  /* USER CODE BEGIN TIM2_Init 0 */
-
-  /* USER CODE END TIM2_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 65535;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_OC_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
-
-  /* USER CODE END TIM2_Init 2 */
-
-}
-
-/**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART1_Init 0 */
-
-  /* USER CODE END USART1_Init 0 */
-
-  /* USER CODE BEGIN USART1_Init 1 */
-
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
-
-}
-
-/**
-  * @brief USART2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART2_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART2_Init 0 */
-
-  /* USER CODE END USART2_Init 0 */
-
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
-  huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
-  huart2.Init.StopBits = UART_STOPBITS_1;
-  huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART2_Init 2 */
-
-  /* USER CODE END USART2_Init 2 */
-
-}
-
-/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -560,17 +276,15 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIO_GPIO_Port, GPIO_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIO_GPIO_Port, GPIO_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, STEP_1_Pin|STEP_2_Pin|STEP_3_Pin|STEP_4_Pin
-                          |STEP_5_Pin|STEP_6_Pin|STEP_7_Pin|STEP_8_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, PUMP_1_Pin|PUMP_2_Pin|PUMP_3_Pin|PUMP_4_Pin
+                          |PUMP_5_Pin|PUMP_6_Pin|PUMP_7_Pin|PUMP_8_Pin
+                          |PUMP_9_Pin|PUMP_10_Pin|PUMP_11_Pin|PUMP_12_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, DIR_1_Pin|DIR_2_Pin|DIR_3_Pin|EN_3_Pin
-                          |EN_4_Pin|EN_5_Pin|EN_6_Pin|EN_7_Pin
-                          |EN_8_Pin|DIR_4_Pin|DIR_5_Pin|DIR_6_Pin
-                          |DIR_7_Pin|DIR_8_Pin|EN_1_Pin|EN_2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, PUMP_13_Pin|VALVE_1_Pin|VALVE_2_Pin|VALVE_3_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : GPIO_Pin */
   GPIO_InitStruct.Pin = GPIO_Pin;
@@ -579,23 +293,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIO_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : STEP_1_Pin STEP_2_Pin STEP_3_Pin STEP_4_Pin
-                           STEP_5_Pin STEP_6_Pin STEP_7_Pin STEP_8_Pin */
-  GPIO_InitStruct.Pin = STEP_1_Pin|STEP_2_Pin|STEP_3_Pin|STEP_4_Pin
-                          |STEP_5_Pin|STEP_6_Pin|STEP_7_Pin|STEP_8_Pin;
+  /*Configure GPIO pins : PUMP_1_Pin PUMP_2_Pin PUMP_3_Pin PUMP_4_Pin
+                           PUMP_5_Pin PUMP_6_Pin PUMP_7_Pin PUMP_8_Pin
+                           PUMP_9_Pin PUMP_10_Pin PUMP_11_Pin PUMP_12_Pin */
+  GPIO_InitStruct.Pin = PUMP_1_Pin|PUMP_2_Pin|PUMP_3_Pin|PUMP_4_Pin
+                          |PUMP_5_Pin|PUMP_6_Pin|PUMP_7_Pin|PUMP_8_Pin
+                          |PUMP_9_Pin|PUMP_10_Pin|PUMP_11_Pin|PUMP_12_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : DIR_1_Pin DIR_2_Pin DIR_3_Pin EN_3_Pin
-                           EN_4_Pin EN_5_Pin EN_6_Pin EN_7_Pin
-                           EN_8_Pin DIR_4_Pin DIR_5_Pin DIR_6_Pin
-                           DIR_7_Pin DIR_8_Pin EN_1_Pin EN_2_Pin */
-  GPIO_InitStruct.Pin = DIR_1_Pin|DIR_2_Pin|DIR_3_Pin|EN_3_Pin
-                          |EN_4_Pin|EN_5_Pin|EN_6_Pin|EN_7_Pin
-                          |EN_8_Pin|DIR_4_Pin|DIR_5_Pin|DIR_6_Pin
-                          |DIR_7_Pin|DIR_8_Pin|EN_1_Pin|EN_2_Pin;
+  /*Configure GPIO pins : PUMP_13_Pin VALVE_1_Pin VALVE_2_Pin VALVE_3_Pin */
+  GPIO_InitStruct.Pin = PUMP_13_Pin|VALVE_1_Pin|VALVE_2_Pin|VALVE_3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -629,61 +339,23 @@ void start_task_can_handler(void *argument)
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_start_task_command_parser */
+/* USER CODE BEGIN Header_start_task_dispatcher */
 /**
-* @brief Function implementing the task_command_pa thread.
+* @brief Function implementing the task_dispatcher thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_start_task_command_parser */
-void start_task_command_parser(void *argument)
+/* USER CODE END Header_start_task_dispatcher */
+void start_task_dispatcher(void *argument)
 {
-  /* USER CODE BEGIN start_task_command_parser */
-  app_start_task_command_parser(argument);
+  /* USER CODE BEGIN start_task_dispatcher */
+	app_start_task_dispatcher(argument);
   /* Infinite loop */
   for(;;)
   {
     osDelay(1);
   }
-  /* USER CODE END start_task_command_parser */
-}
-
-/* USER CODE BEGIN Header_start_task_motion_controller */
-/**
-* @brief Function implementing the task_motion_con thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_start_task_motion_controller */
-void start_task_motion_controller(void *argument)
-{
-  /* USER CODE BEGIN start_task_motion_controller */
-  app_start_task_motion_controller(argument);
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END start_task_motion_controller */
-}
-
-/* USER CODE BEGIN Header_start_task_tmc2209_manager */
-/**
-* @brief Function implementing the task_tmc2209_ma thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_start_task_tmc2209_manager */
-void start_task_tmc2209_manager(void *argument)
-{
-  /* USER CODE BEGIN start_task_tmc2209_manager */
-  app_start_task_tmc2209_manager(argument);
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END start_task_tmc2209_manager */
+  /* USER CODE END start_task_dispatcher */
 }
 
 /**

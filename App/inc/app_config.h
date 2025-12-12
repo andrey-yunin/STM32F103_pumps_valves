@@ -8,13 +8,22 @@
 #ifndef APP_CONFIG_H_
 #define APP_CONFIG_H_
 
+#include"main.h"
+
 // =============================================================================
 //                             ОБЩИЕ НАСТРОЙКИ ПРИЛОЖЕНИЯ
 // =============================================================================
 
-#define MOTOR_COUNT                 8 // Общее количество моторов в системе
-
 #define CAN_DATA_MAX_LEN            8 // Максимальная длина поля данных CAN-фрейма (в байтах)
+
+// Количество насосов в системе
+
+#define NUM_PUMPS                   13
+
+// Количество клапанов в системе
+
+#define NUM_VALVES                   3
+
 
 // =============================================================================
 //                             НАСТРОЙКИ ОЧЕРЕДЕЙ FREERTOS
@@ -29,27 +38,8 @@
 #define CAN_TX_QUEUE_LEN            10
 
 // Очередь для передачи команд парсеру
-#define PARSER_QUEUE_LEN            10
+#define DISPATCHER_QUEUE_LEN        10
 
-// Очередь для заданий на движение
-#define MOTION_QUEUE_LEN            5
-
-// Очередь для команд TMC-драйверам
-#define TMC_MANAGER_QUEUE_LEN       5
-
-
-// -- РАЗМЕР ЭЛЕМЕНТОВ ОЧЕРЕДЕЙ --
-// Мы будем определять размер через sizeof(struct) при создании очереди,
-// чтобы не дублировать информацию и избежать ошибок.
-
-// Cтруктура задания для Task_Motion_Controller
-typedef struct {
-	uint8_t motor_id;
-    uint8_t direction;
-    uint32_t steps;
-    uint32_t speed_steps_per_sec;
-    uint32_t acceleration_steps_per_sec2;
-    } MotionCommand_t;
 
 // Структура для хранения полного Rx CAN-фрейма (header + data)
 typedef struct {
