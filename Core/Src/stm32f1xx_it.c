@@ -26,8 +26,7 @@
 #include "cmsis_os.h"
 #include "app_queues.h" // Для can_rx_queueHandle
 #include "app_config.h" // Чтобы видеть CanFrame_t
-#include "motor_gpio.h"
-#include "app_globals.h"
+
 
 
 
@@ -50,8 +49,6 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-
-extern TIM_HandleTypeDef htim2;
 
 /* USER CODE END PV */
 
@@ -172,6 +169,20 @@ void DebugMon_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles USB low priority or CAN RX0 interrupts.
+  */
+void USB_LP_CAN1_RX0_IRQHandler(void)
+{
+  /* USER CODE BEGIN USB_LP_CAN1_RX0_IRQn 0 */
+
+  /* USER CODE END USB_LP_CAN1_RX0_IRQn 0 */
+  HAL_CAN_IRQHandler(&hcan);
+  /* USER CODE BEGIN USB_LP_CAN1_RX0_IRQn 1 */
+
+  /* USER CODE END USB_LP_CAN1_RX0_IRQn 1 */
+}
+
+/**
   * @brief This function handles CAN RX1 interrupt.
   */
 void CAN1_RX1_IRQHandler(void)
@@ -207,8 +218,9 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	// Извлекаем сообщение из аппаратного буфера CAN FIFO0
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_frame.header, rx_frame.data) == HAL_OK)
 		{
-		// Помещаем весь фрейм в очередь can_rx_queue для обработки
-		osMessageQueuePut(can_rx_queueHandle, &rx_frame, 0, 0); // priority 0, timeout 0 (немедленно)
+		// Помещаем фрейм в очередь и сигнализируем задаче CAN Handler
+		osMessageQueuePut(can_rx_queueHandle, &rx_frame, 0, 0);
+		osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_RX);
 		}
 }
 

@@ -17,7 +17,6 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
-#include <task_dispatcher.h>
 #include "main.h"
 #include "cmsis_os.h"
 
@@ -25,8 +24,9 @@
 /* USER CODE BEGIN Includes */
 
 #include "task_can_handler.h"
+#include "task_command_parser.h"
 #include "app_config.h"
-#include "command_protocol.h"
+#include "task_pump_controller.h"
 #include "app_globals.h"
 
 
@@ -58,18 +58,27 @@ const osThreadAttr_t task_can_handle_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
-/* Definitions for task_dispatcher */
-osThreadId_t task_dispatcherHandle;
-const osThreadAttr_t task_dispatcher_attributes = {
-  .name = "task_dispatcher",
-  .stack_size = 256 * 4,
+/* Definitions for task_command_pa */
+osThreadId_t task_command_paHandle;
+const osThreadAttr_t task_command_pa_attributes = {
+  .name = "task_command_pa",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for task_pump_contr */
+osThreadId_t task_pump_contrHandle;
+const osThreadAttr_t task_pump_contr_attributes = {
+  .name = "task_pump_contr",
+  .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
 
 osMessageQueueId_t can_rx_queueHandle;
 osMessageQueueId_t can_tx_queueHandle;
-osMessageQueueId_t dispatcher_queueHandle;
+osMessageQueueId_t parser_queueHandle;
+osMessageQueueId_t domain_queueHandle;
+
 
 /* USER CODE END PV */
 
@@ -78,7 +87,8 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
 void start_task_can_handler(void *argument);
-void start_task_dispatcher(void *argument);
+void start_task_command_parser(void *argument);
+void start_task_pump_controller(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -123,12 +133,16 @@ int main(void)
   // Создание очередей FreeRTOS с использованием именованных констант
 can_rx_queueHandle = osMessageQueueNew(CAN_RX_QUEUE_LEN, sizeof(CanRxFrame_t), NULL); // CAN-фрейм: на прием
 can_tx_queueHandle = osMessageQueueNew(CAN_TX_QUEUE_LEN, sizeof(CanTxFrame_t), NULL); // CAN-фрейм на отправку
-dispatcher_queueHandle = osMessageQueueNew(DISPATCHER_QUEUE_LEN, sizeof(CAN_Command_t), NULL); // Структура команды
+parser_queueHandle = osMessageQueueNew(PARSER_QUEUE_LEN, sizeof(ParsedCanCommand_t), NULL); // Структура команды
+domain_queueHandle = osMessageQueueNew(DOMAIN_QUEUE_LEN, sizeof(PumpValveCommand_t), NULL);
+
 
 // Проверка успешности создания очередей
-if (can_rx_queueHandle == NULL || dispatcher_queueHandle == NULL || can_tx_queueHandle == NULL) {
-	Error_Handler();
-    }
+if (can_rx_queueHandle == NULL || parser_queueHandle == NULL ||
+     can_tx_queueHandle == NULL || domain_queueHandle == NULL) {
+       Error_Handler();
+     }
+
 
 
   /* USER CODE END 2 */
@@ -156,8 +170,11 @@ if (can_rx_queueHandle == NULL || dispatcher_queueHandle == NULL || can_tx_queue
   /* creation of task_can_handle */
   task_can_handleHandle = osThreadNew(start_task_can_handler, NULL, &task_can_handle_attributes);
 
-  /* creation of task_dispatcher */
-  task_dispatcherHandle = osThreadNew(start_task_dispatcher, NULL, &task_dispatcher_attributes);
+  /* creation of task_command_pa */
+  task_command_paHandle = osThreadNew(start_task_command_parser, NULL, &task_command_pa_attributes);
+
+  /* creation of task_pump_contr */
+  task_pump_contrHandle = osThreadNew(start_task_pump_controller, NULL, &task_pump_contr_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -339,23 +356,44 @@ void start_task_can_handler(void *argument)
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_start_task_dispatcher */
+/* USER CODE BEGIN Header_start_task_command_parser */
 /**
-* @brief Function implementing the task_dispatcher thread.
+* @brief Function implementing the task_command_pa thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_start_task_dispatcher */
-void start_task_dispatcher(void *argument)
+/* USER CODE END Header_start_task_command_parser */
+void start_task_command_parser(void *argument)
 {
-  /* USER CODE BEGIN start_task_dispatcher */
-	app_start_task_dispatcher(argument);
+  /* USER CODE BEGIN start_task_command_parser */
+	app_start_task_command_parser(argument);
+
   /* Infinite loop */
   for(;;)
   {
     osDelay(1);
   }
-  /* USER CODE END start_task_dispatcher */
+  /* USER CODE END start_task_command_parser */
+}
+
+/* USER CODE BEGIN Header_start_task_pump_controller */
+/**
+* @brief Function implementing the task_pump_contr thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_start_task_pump_controller */
+void start_task_pump_controller(void *argument)
+{
+  /* USER CODE BEGIN start_task_pump_controller */
+  app_start_task_pump_controller(argument);
+
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END start_task_pump_controller */
 }
 
 /**
