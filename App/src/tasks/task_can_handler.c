@@ -11,6 +11,7 @@
  */
 
 #include "task_can_handler.h"
+#include "app_flash.h"
 #include "main.h"
 #include "cmsis_os.h"
 #include "app_queues.h"
@@ -28,7 +29,7 @@ void CAN_SendAck(uint16_t cmd_code)
 {
 	CanTxFrame_t tx;
     tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_ACK,
-                                      CAN_ADDR_CONDUCTOR, CAN_ADDR_THIS_BOARD);
+                                      CAN_ADDR_CONDUCTOR, AppConfig_GetPerformerID());
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
     tx.header.DLC = 2;
@@ -43,7 +44,7 @@ void CAN_SendNackPublic(uint16_t cmd_code, uint16_t error_code)
 {
 	CanTxFrame_t tx;
 	tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_NACK,
-                                      CAN_ADDR_CONDUCTOR, CAN_ADDR_THIS_BOARD);
+                                      CAN_ADDR_CONDUCTOR, AppConfig_GetPerformerID());
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
     tx.header.DLC = 4;
@@ -60,7 +61,7 @@ void CAN_SendDone(uint16_t cmd_code, uint8_t device_id)
 {
 	CanTxFrame_t tx;
     tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_DATA_DONE_LOG,
-    		CAN_ADDR_CONDUCTOR, CAN_ADDR_THIS_BOARD);
+    		CAN_ADDR_CONDUCTOR, AppConfig_GetPerformerID());
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
     tx.header.DLC = 4;
@@ -73,6 +74,28 @@ void CAN_SendDone(uint16_t cmd_code, uint8_t device_id)
     osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_TX);
 }
 
+
+void CAN_SendData(uint16_t cmd_code, uint8_t *data, uint8_t len)
+{
+	CanTxFrame_t tx;
+	tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_DATA_DONE_LOG,
+			CAN_ADDR_CONDUCTOR, AppConfig_GetPerformerID());
+	tx.header.IDE = CAN_ID_EXT;
+    tx.header.RTR = CAN_RTR_DATA;
+    tx.header.DLC = 8;
+
+    tx.data[0] = CAN_SUB_TYPE_DATA;
+    tx.data[1] = 0x80; // Sequence Info (EOT=1, Seq=0)
+
+    for (uint8_t i = 0; i < len && i < 6; i++) {
+    	tx.data[2 + i] = data[i];
+    	}
+
+    osMessageQueuePut(can_tx_queueHandle, &tx, 0, 0);
+    osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_TX);
+}
+
+
 // ============================================================
 // Основная задача
 // ============================================================
@@ -83,24 +106,22 @@ void app_start_task_can_handler(void *argument)
     CanTxFrame_t tx_frame;
     uint32_t txMailbox;
 
-    // --- Настройка CAN-фильтра для 29-bit ExtID ---
-    // Фильтруем по DstAddr = CAN_ADDR_THIS_BOARD (0x30) в битах 23-16
-    // В 32-bit фильтре bxCAN биты сдвинуты на 3 (выравнивание по регистру)
-    // ExtID[28:0] → FilterId[31:3], IDE=1 → бит 2
+
+    // --- Настройка CAN-фильтра (Принимаем всё, фильтруем программно) ---
+
     CAN_FilterTypeDef sFilterConfig;
-    uint32_t filter_id   = ((uint32_t)CAN_ADDR_THIS_BOARD << 16) << 3 | (1 << 2); // IDE=1
-    uint32_t filter_mask = ((uint32_t)0xFF << 16) << 3 | (1 << 2); // Маска на DstAddr + IDE
 
     sFilterConfig.FilterBank = 0;
     sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
     sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
-    sFilterConfig.FilterIdHigh = (uint16_t)(filter_id >> 16);
-    sFilterConfig.FilterIdLow = (uint16_t)(filter_id & 0xFFFF);
-    sFilterConfig.FilterMaskIdHigh = (uint16_t)(filter_mask >> 16);
-    sFilterConfig.FilterMaskIdLow = (uint16_t)(filter_mask & 0xFFFF);
+    sFilterConfig.FilterIdHigh = 0x0000;
+    sFilterConfig.FilterIdLow = 0x0000 | (1 << 2); // IDE=1
+    sFilterConfig.FilterMaskIdHigh = 0x0000;
+    sFilterConfig.FilterMaskIdLow = 0x0000 | (1 << 2);
     sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
     sFilterConfig.FilterActivation = ENABLE;
     sFilterConfig.SlaveStartFilterBank = 14;
+
 
     if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK) {
     	Error_Handler();
@@ -128,42 +149,32 @@ void app_start_task_can_handler(void *argument)
     		while (osMessageQueueGet(can_rx_queueHandle, &rx_frame, NULL, 0) == osOK)
     			{
     			// Проверка: Extended ID
-    			if (rx_frame.header.IDE != CAN_ID_EXT) {
-    				continue;
-    				}
+    			if (rx_frame.header.IDE != CAN_ID_EXT) continue;
 
-    			// Извлечение полей из 29-bit CAN ID
-    			uint32_t ext_id = rx_frame.header.ExtId;
-                uint8_t msg_type = CAN_GET_MSG_TYPE(ext_id);
-                uint8_t dst_addr = CAN_GET_DST_ADDR(ext_id);
+    			 uint32_t can_id = rx_frame.header.ExtId;
+    			 uint8_t dst_addr = CAN_GET_DST_ADDR(can_id);
 
-                // Проверка: адресовано нам или broadcast
-                if (dst_addr != CAN_ADDR_THIS_BOARD && dst_addr != CAN_ADDR_BROADCAST) {
-                	continue;
-                	}
+    			 // Динамическая фильтрация
+    			 if (dst_addr != AppConfig_GetPerformerID() && dst_addr != CAN_ADDR_BROADCAST) {
+    				 continue;
+    				 }
 
-                // Проверка: только команды
-                if (msg_type != CAN_MSG_TYPE_COMMAND) {
-                	continue;
-                	}
+    			 if (CAN_GET_MSG_TYPE(can_id) != CAN_MSG_TYPE_COMMAND) continue;
+    			 if (rx_frame.header.DLC < 3) continue;
 
-                // Проверка: минимальный DLC (cmd_code 2 байта + device_id 1 байт)
-                if (rx_frame.header.DLC < 3) {
-                	continue;
-                	}
 
-                // Упаковка в ParsedCanCommand_t
-                ParsedCanCommand_t parsed;
-                parsed.cmd_code = (uint16_t)(rx_frame.data[0] |
-                		((uint16_t)rx_frame.data[1] << 8));
-                parsed.device_id = rx_frame.data[2];
-                parsed.data_len = rx_frame.header.DLC - 3;
+    			 // Упаковка в ParsedCanCommand_t
+    			 ParsedCanCommand_t parsed;
+    			 parsed.cmd_code = (uint16_t)(rx_frame.data[0] |
+    					 ((uint16_t)rx_frame.data[1] << 8));
+    			 parsed.device_id = rx_frame.data[2];
+    			 parsed.data_len = rx_frame.header.DLC - 3;
 
-                for (uint8_t i = 0; i < parsed.data_len && i < 5; i++) {
-                	parsed.data[i] = rx_frame.data[3 + i];
-                	}
-                osMessageQueuePut(dispatcher_queueHandle, &parsed, 0, 0);
-                }
+    			 for (uint8_t i = 0; i < parsed.data_len && i < 5; i++) {
+    				 parsed.data[i] = rx_frame.data[3 + i];
+    				 }
+    			 osMessageQueuePut(dispatcher_queueHandle, &parsed, 0, 0);
+    			 }
     		}
 
     	// --- Отправка исходящих CAN-фреймов ---
@@ -171,7 +182,16 @@ void app_start_task_can_handler(void *argument)
     		{
     		while (osMessageQueueGet(can_tx_queueHandle, &tx_frame, NULL, 0) == osOK)
     			{
-    			HAL_CAN_AddTxMessage(&hcan, &tx_frame.header, tx_frame.data, &txMailbox);
+    			// Mailbox Guard (Advanced)
+    			uint32_t start_tick = osKernelGetTickCount();
+    			while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) == 0) {
+    				if ((osKernelGetTickCount() - start_tick) > 10) break;
+    				osDelay(1);
+    				}
+
+    			if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) > 0) {
+    				HAL_CAN_AddTxMessage(&hcan, &tx_frame.header, tx_frame.data, &txMailbox);
+    				}
     			}
     		}
     	}

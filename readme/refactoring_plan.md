@@ -11,13 +11,14 @@
     - [x] Работа с Page 63 (STM32F103).
     - [x] Структура с Magic Key (0x55AAEEFF) и CRC16.
     - [x] Сохранение/загрузка NodeID и Fluidic Map.
-- [ ] **1.4. Транспортный уровень (bxCAN)**:
-    - [ ] Аудит `task_can_handler`: Mailbox Guard (проверка ящиков перед передачей).
-    - [ ] Поддержка Broadcast (`DstAddr = 0x00`).
-    - [ ] Переход на динамический NodeID (из `AppConfig`).
+- [x] **1.4. Транспортный уровень (bxCAN)**:
+    - [x] Аудит `task_can_handler`: Mailbox Guard (проверка ящиков перед передачей).
+    - [x] Поддержка Broadcast (`DstAddr = 0x00`).
+    - [x] Переход на динамический NodeID (из `AppConfig`).
+    - [x] Реализация `CAN_SendData` с поддержкой EOT.
 
 ## Этап 2: Сервисный слой (0xFxxx)
-- [ ] **2.1. Коды команд**: Добавление констант `0xF001-0xF00F` в `can_protocol.h`.
+- [x] **2.1. Коды команд**: Синхронизация `can_protocol.h` с эталоном (0xF001-0xF00F, Magic Keys).
 - [ ] **2.2. Обработка в Диспетчере (`task_dispatcher`)**:
     - [ ] `0xF001` (Get Info): Сборка ответа (Type, Ver, UID).
     - [ ] `0xF002` (Reboot): NVIC_SystemReset() с проверкой Magic Key `0xDEAD`.
