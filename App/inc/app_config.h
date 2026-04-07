@@ -5,76 +5,87 @@
  *      Author: andrey
  *
  *  Refactored: Mar 6, 2026
+ *  Updated: Apr 7, 2026 (Compliance with DDS-240 Ecosystem Standard)
  */
 
 #ifndef APP_CONFIG_H_
 #define APP_CONFIG_H_
 
-#include "main.h"
+#include <main.h>
 #include <stdbool.h>
 
 // =============================================================================
 //                             ОБЩИЕ НАСТРОЙКИ ПРИЛОЖЕНИЯ
 // =============================================================================
 
-#define CAN_DATA_MAX_LEN            8   // Максимальная длина поля данных CAN-фрейма
-
-// Количество насосов в системе
+// Количество исполнительных устройств на плате
 #define NUM_PUMPS                   13
-
-// Количество клапанов в системе
 #define NUM_VALVES                  3
+#define TOTAL_DEVICES               (NUM_PUMPS + NUM_VALVES) // Всего 16
 
-// =============================================================================
-//                             ФЛАГИ СОБЫТИЙ (osThreadFlags)
-// =============================================================================
+#define DEVICE_ID_INVALID           0xFF // Значение для неинициализированного устройства
 
-#define FLAG_CAN_RX                 0x01
-#define FLAG_CAN_TX                 0x02
+// Версия прошивки (согласно стандарту)
+#define FW_REV_MAJOR                0x01
+#define FW_REV_MINOR                0x01
+#define FW_REV_PATCH                0x00
+
+// Тип устройства (DDS-240 Standard)
+#define CAN_DEVICE_TYPE_PUMP        0x30 // Исполнитель: Насосы и клапаны
+#define CAN_DEVICE_TYPE_MOTOR       0x20 // Исполнитель: Моторы (для справки)
+
+#define CAN_DATA_MAX_LEN            8    // Максимальная длина поля данных CAN-фрейма
 
 // =============================================================================
 //                             НАСТРОЙКИ ОЧЕРЕДЕЙ FREERTOS
 // =============================================================================
 
-#define CAN_RX_QUEUE_LEN            10
-#define CAN_TX_QUEUE_LEN            10
-#define PARSER_QUEUE_LEN            10
-#define DOMAIN_QUEUE_LEN            5
+#define CAN_RX_QUEUE_LEN            16
+#define CAN_TX_QUEUE_LEN            16
+#define DISPATCHER_QUEUE_LEN        10
+#define FLUIDICS_QUEUE_LEN          8
+
+// Флаги для Task_CAN_Handler (osThreadFlags)
+#define FLAG_CAN_RX                 0x01
+#define FLAG_CAN_TX                 0x02
 
 // =============================================================================
-//                             СТРУКТУРЫ ЭЛЕМЕНТОВ ОЧЕРЕДЕЙ
+//                             СТРУКТУРЫ ДАННЫХ
 // =============================================================================
 
-// Структура для хранения полного Rx CAN-фрейма (header + data)
+/**
+ * @brief Промежуточная структура: CAN Handler -> Dispatcher
+ * Содержит распакованные поля CAN-фрейма по стандарту DDS-240
+ */
 typedef struct {
-	CAN_RxHeaderTypeDef header;
-    uint8_t data[CAN_DATA_MAX_LEN];
-    } CanRxFrame_t;
+    uint16_t cmd_code;      // Код команды (байты 0-1 payload, Little-Endian)
+    uint8_t  device_id;     // ID целевого устройства/канала (байт 2 payload)
+    uint8_t  data[5];       // Параметры команды (байты 3-7 payload)
+    uint8_t  data_len;      // Длина полезных данных в массиве data
+} ParsedCanCommand_t;
 
-// Структура для хранения полного Tx CAN-фрейма (header + data)
-typedef struct {
-	CAN_TxHeaderTypeDef header;
-	uint8_t data[CAN_DATA_MAX_LEN];
-	} CanTxFrame_t;
-
-// Промежуточная структура: CAN Handler -> Command Parser
-typedef struct {
-	uint16_t cmd_code;      // CAN-код команды (байты 0-1 payload, LE)
-	uint8_t  device_id;     // Логический ID устройства (байт 2 payload)
-    uint8_t  data[5];       // Сырые данные параметров (байты 3-7 payload)
-    uint8_t  data_len;      // Количество байт в data (DLC - 3)
-    } ParsedCanCommand_t;
-
-// Доменная структура: Command Parser -> Pump Controller
+/**
+ * @brief Доменная структура задания для Task_Pump_Controller
+ */
 typedef struct {
 	uint8_t  physical_id;   // Физический индекс (0-based) в массиве GPIO
 	uint8_t  device_type;   // DEVICE_TYPE_PUMP или DEVICE_TYPE_VALVE
 	uint16_t cmd_code;      // Для ACK/NACK/DONE
 	uint8_t  device_id;     // Логический ID (для DONE)
 	bool     state;         // true=ON/OPEN, false=OFF/CLOSE
-	} PumpValveCommand_t;
+} PumpValveCommand_t;
+
+/**
+ * @brief Обертки для HAL CAN фреймов
+ */
+typedef struct {
+    CAN_RxHeaderTypeDef header;
+    uint8_t data[CAN_DATA_MAX_LEN];
+} CanRxFrame_t;
+
+typedef struct {
+    CAN_TxHeaderTypeDef header;
+    uint8_t data[CAN_DATA_MAX_LEN];
+} CanTxFrame_t;
 
 #endif // APP_CONFIG_H
-
-
-

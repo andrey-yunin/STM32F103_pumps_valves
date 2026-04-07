@@ -3,6 +3,8 @@ Debug/
 Release/
 .venv/
 
+pattern/
+
 
 # STM32CubeIDE project files
 .cproject

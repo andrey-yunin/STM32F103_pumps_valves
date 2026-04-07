@@ -85,14 +85,6 @@
 6. **Остаточный код**: motor_gpio.h, motion_planner.h, extern TIM2
 7. **Баг индексации**: PumpID_t начинается с 1, массив с 0
 
-Выполненные корректировки:
-
-1. **Переименование task_dispatcher -> task_command_parser** — приведение
-   к единой архитектуре с проектом шаговых двигателей. Затронуты файлы:
-   `task_command_parser.c/.h`, `main.c`, `app_queues.h`, `app_config.h`,
-   `task_can_handler.c`. CubeMX сгенерировал укороченное имя задачи
-   `task_command_pa` (ограничение 15 символов) — функционально не влияет.
-
 ### 4.3. Фаза 3: Рефакторинг (06.03.2026)
 
 Подробный план — см. `refactoring_plan.md`.
@@ -106,33 +98,48 @@
 - Удаление кода шаговых двигателей (motor_gpio.h, motion_planner.h, TIM2)
 - Удалён `command_protocol.h` из включений main.c (файл подлежит удалению)
 - **Этап 6**: main.c обновлён — domain_queue, task_pump_controller, ParsedCanCommand_t
+- **Этап 5 (10.03.2026)**: Исправление индексации в `pumps_valves_gpio.h/.c` (критический баг устранен).
+- **Этап 7**: Удаление файла `command_protocol.h`.
+- **Сборка**: Проект собирается без ошибок.
 
-Не выполнено:
-- **Этап 5**: Исправление индексации в `pumps_valves_gpio.h/.c` (критический баг)
-- **Этап 7**: Удаление файла `command_protocol.h`
-- **Этап 8**: Тестирование
+### 4.4. Фаза 4: Синхронизация с экосистемой DDS-240 (07.04.2026)
+
+Проведен аудит и приведение архитектуры к стандарту версии 1.1 (Апрель 2026).
+
+**Выполненные изменения:**
+- **Именование задач**: `task_command_parser` переименована обратно в `task_dispatcher` (согласно стандарту).
+- **Унификация очередей**: `parser_queueHandle` -> `dispatcher_queueHandle`, `domain_queueHandle` -> `fluidics_queueHandle`.
+- **Обновление конфигурации**: В `app_config.h` добавлены макросы версий прошивки и типа устройства `CAN_DEVICE_TYPE_PUMP (0x30)`.
+- **Исправление типов**: Добавлен `stdbool.h` для корректной работы с типом `bool`.
+- **Инфраструктура**: Файл `main.c` очищен от мусора и приведен к стандарту.
+- **Flash и Идентификация**: Создан модуль `app_flash.h/c`, реализовано чтение UID и хранение маппинга во Flash (Page 63). Модуль интегрирован в `main.c`.
+
+**Чек-лист соответствия (Compliance Checklist):**
+- [x] **Архитектура**: Имена задач соответствуют стандарту (`task_dispatcher`).
+- [x] **Именование IPC**: Очереди переименованы (`dispatcher_queueHandle`, `fluidics_queueHandle`).
+- [x] **Идентификация**: Чтение 96-bit MCU UID реализовано в `app_flash.c`.
+- [x] **Flash-конфиг**: Хранение NodeID на Page 63 с Magic Key и CRC16 реализовано.
+- [ ] **Сервисный слой**: Поддержка команд `0xF0xx` (Info, Reboot, Set NodeID).
+- [ ] **Транспорт**: Mailbox Guard и Broadcast (ID 0x00).
+- [ ] **Fluidics**: Реализованы защитные таймауты (Safety Timeout).
+
+**Текущий статус**: "Infrastructure Synchronized & Flash Ready" (Инфраструктура и Flash-слой готовы).
+
+## 5. Таблица текущего состояния компонентов
+
 | Component | Status |
 |:----------|:-------|
-| GPIO насосов/клапанов | Настроен в CubeMX, модуль создан |
-| pumps_valves_gpio индексация | ВЫПОЛНЕНО (устранено смещение и hex-ошибки) |
-| Переименование task -> command_parser | ВЫПОЛНЕНО |
-| CAN RX0 interrupt | ВКЛЮЧЕН, callback с FLAG_CAN_RX |
-| CAN-протокол дирижера (29-bit ExtID) | ВЫПОЛНЕНО |
+| GPIO насосов/клапанов | ВЫПОЛНЕНО (модуль `pumps_valves_gpio`) |
+| Архитектура задач (DDS-240) | ВЫПОЛНЕНО (`task_dispatcher`, `fluidics_queueHandle`) |
+| CAN-протокол (29-bit ExtID) | ВЫПОЛНЕНО |
 | ACK/NACK/DONE | ВЫПОЛНЕНО |
 | can_protocol.h | СОЗДАН |
 | device_mapping | СОЗДАН |
-| task_command_parser | ВЫПОЛНЕНО |
-| task_pump_controller | ВЫПОЛНЕНО |
-| main.c | ВЫПОЛНЕНО |
-| Очистка от шаговых | ВЫПОЛНЕНО |
-| command_protocol.h | УДАЛЁН |
-| Сборка | ВЫПОЛНЕНО (сборка без ошибок) |
+| Идентификация и Flash-конфиг | ВЫПОЛНЕНО (`app_flash`) |
 
 ---
-...
----
 
-*Документ обновлён: 10.03.2026*
+*Заметки от 10.03.2026:*
 
 1. **Маппинг device_id**: В реестре дирижера (`device_mapping.h`) определены
    только 2 насоса (`DEV_WASH_PUMP_FILL=10`, `DEV_WASH_PUMP_DRAIN=11`).
@@ -152,18 +159,18 @@
 | Задача | Стек | Приоритет | Назначение |
 |:-------|:-----|:----------|:-----------|
 | task_can_handle | 128×4 (512 Б) | High | Транспорт: CAN RX/TX, фильтрация, event-driven |
-| task_command_pa | 128×4 (512 Б) | Normal | Парсинг cmd_code, маппинг device_id, валидация |
+| task_dispatcher | 128×4 (512 Б) | Normal | Прикладная логика, парсинг, сервисные команды |
 | task_pump_contr | 128×4 (512 Б) | Normal | Исполнение GPIO, ACK/DONE |
 
 ## 8. Очереди FreeRTOS
 
 | Очередь | Размер | Элемент | Направление |
 |:--------|:-------|:--------|:------------|
-| can_rx_queue | 10 | CanRxFrame_t | ISR → CAN Handler |
-| can_tx_queue | 10 | CanTxFrame_t | Любая задача → CAN Handler |
-| parser_queue | 10 | ParsedCanCommand_t | CAN Handler → Command Parser |
-| domain_queue | 5 | PumpValveCommand_t | Command Parser → Pump Controller |
+| can_rx_queue | 16 | CanRxFrame_t | ISR → CAN Handler |
+| can_tx_queue | 16 | CanTxFrame_t | Любая задача → CAN Handler |
+| dispatcher_queue | 10 | ParsedCanCommand_t | CAN Handler → Dispatcher |
+| fluidics_queue | 8 | PumpValveCommand_t | Dispatcher → Pump Controller |
 
 ---
 
-*Документ обновлён: 06.03.2026*
+*Документ обновлён: 07.04.2026*

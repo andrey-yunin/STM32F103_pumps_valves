@@ -162,7 +162,7 @@ void app_start_task_can_handler(void *argument)
                 for (uint8_t i = 0; i < parsed.data_len && i < 5; i++) {
                 	parsed.data[i] = rx_frame.data[3 + i];
                 	}
-                osMessageQueuePut(parser_queueHandle, &parsed, 0, 0);
+                osMessageQueuePut(dispatcher_queueHandle, &parsed, 0, 0);
                 }
     		}
 

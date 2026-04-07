@@ -23,7 +23,7 @@ void app_start_task_pump_controller(void *argument)
 	for (;;)
 		{
 		// Ждём доменную команду от Command Parser
-		if (osMessageQueueGet(domain_queueHandle, &cmd, NULL, osWaitForever) != osOK) {
+		if (osMessageQueueGet(fluidics_queueHandle, &cmd, NULL, osWaitForever) != osOK) {
 			continue;
 			}
 
