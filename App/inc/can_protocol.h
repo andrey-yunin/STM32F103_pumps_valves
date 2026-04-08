@@ -44,9 +44,15 @@
 #define CAN_ADDR_HOST               0x01
 #define CAN_ADDR_CONDUCTOR          0x10
 #define CAN_ADDR_MOTOR_BOARD        0x20
-#define CAN_ADDR_PUMP_BOARD         0x30
-#define CAN_ADDR_THERMO_BOARD       0x40
+#define CAN_ADDR_PUMP_BOARD     0x30
+#define CAN_ADDR_THERMO_BOARD   0x40
 
+// ============================================================
+// Типы устройств (Hardware Type ID для команды INFO)
+// ============================================================
+#define CAN_DEVICE_TYPE_MOTION  0x01  // Плата управления моторами
+#define CAN_DEVICE_TYPE_THERMO  0x02  // Плата термоконтроллера
+#define CAN_DEVICE_TYPE_FLUIDIC 0x03  // Плата управления жидкостью (Насосы/Клапаны)
 
 // ============================================================
 // Коды команд (байты 0-1 payload, Little-Endian) Fluidics (0x02xx)
@@ -73,7 +79,7 @@
 
 // Магические ключи для опасных операций
 #define SRV_MAGIC_REBOOT                0x55AA  // Ключ для Reboot
-#define SRV_MAGIC_FACTORY_RESET         0xFACE  // Ключ для Factory Reset
+#define SRV_MAGIC_FACTORY_RESET         0xDEAD  // Ключ для Factory Reset
 
 
 

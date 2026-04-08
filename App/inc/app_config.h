@@ -25,14 +25,10 @@
 
 #define DEVICE_ID_INVALID           0xFF // Значение для неинициализированного устройства
 
-// Версия прошивки (согласно стандарту)
+// Версия прошивки
 #define FW_REV_MAJOR                0x01
 #define FW_REV_MINOR                0x01
 #define FW_REV_PATCH                0x00
-
-// Тип устройства (DDS-240 Standard)
-#define CAN_DEVICE_TYPE_PUMP        0x30 // Исполнитель: Насосы и клапаны
-#define CAN_DEVICE_TYPE_MOTOR       0x20 // Исполнитель: Моторы (для справки)
 
 #define CAN_DATA_MAX_LEN            8    // Максимальная длина поля данных CAN-фрейма
 
@@ -69,7 +65,7 @@ typedef struct {
  */
 typedef struct {
 	uint8_t  physical_id;   // Физический индекс (0-based) в массиве GPIO
-	uint8_t  device_type;   // DEVICE_TYPE_PUMP или DEVICE_TYPE_VALVE
+	uint8_t  device_type;   // 0=PUMP, 1=VALVE
 	uint16_t cmd_code;      // Для ACK/NACK/DONE
 	uint8_t  device_id;     // Логический ID (для DONE)
 	bool     state;         // true=ON/OPEN, false=OFF/CLOSE

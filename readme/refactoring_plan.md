@@ -7,7 +7,7 @@
 - [x] **Синхронизация инфраструктуры**: Переименование очередей в `dispatcher_queueHandle` и `fluidics_queueHandle`.
 - [x] **1.2. Модуль конфигурации и идентификации (`app_flash.h/c`)**:
     - [x] Чтение UID чипа (96 бит).
-    - [x] Определение Device Type (0x30) и версии FW.
+    - [x] Определение Device Type (0x03 - Fluidic) и версии FW.
     - [x] Работа с Page 63 (STM32F103).
     - [x] Структура с Magic Key (0x55AAEEFF) и CRC16.
     - [x] Сохранение/загрузка NodeID и Fluidic Map.
@@ -19,11 +19,13 @@
 
 ## Этап 2: Сервисный слой (0xFxxx)
 - [x] **2.1. Коды команд**: Синхронизация `can_protocol.h` с эталоном (0xF001-0xF00F, Magic Keys).
-- [ ] **2.2. Обработка в Диспетчере (`task_dispatcher`)**:
-    - [ ] `0xF001` (Get Info): Сборка ответа (Type, Ver, UID).
-    - [ ] `0xF002` (Reboot): NVIC_SystemReset() с проверкой Magic Key `0xDEAD`.
-    - [ ] `0xF003` (Commit): Запись RAM-конфигурации во Flash.
-    - [ ] `0xF005` (Set NodeID): Динамическое изменение адреса в RAM.
+- [x] **2.2. Обработка в Диспетчере (`task_dispatcher`)**:
+    - [x] `0xF001` (Get Info): Сборка ответа (Type, Ver, UID).
+    - [x] `0xF002` (Reboot): NVIC_SystemReset() с проверкой Magic Key `0x55AA`.
+    - [x] `0xF003` (Commit): Запись RAM-конфигурации во Flash.
+    - [x] `0xF004` (Get UID): Отдельная команда получения серийного номера.
+    - [x] `0xF005` (Set NodeID): Динамическое изменение адреса в RAM.
+    - [x] `0xF006` (Factory Reset): Сброс настроек и перезагрузка (Key: 0xDEAD).
 
 ## Этап 3: Прикладная логика Fluidics (0x3xx)
 - [ ] **3.1. Маппинг имен**: Уточнение реальных имен насосов и клапанов.
