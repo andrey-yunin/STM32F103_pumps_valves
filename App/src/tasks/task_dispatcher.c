@@ -40,57 +40,66 @@ void app_start_task_dispatcher(void *argument)
 			// ============================================================
 			// ГРУППА 0x02xx: УПРАВЛЕНИЕ ЖИДКОСТНОЙ СИСТЕМОЙ
 			// ============================================================
-			case CAN_CMD_PUMP_START:
+		    case CAN_CMD_PUMP_RUN_DURATION:
+		    case CAN_CMD_PUMP_START:
 			case CAN_CMD_PUMP_STOP:
 			case CAN_CMD_VALVE_OPEN:
 			case CAN_CMD_VALVE_CLOSE:
 			{
-				// --- Трансляция логического ID в физический индекс через Flash Mapping ---
-				uint8_t physical_idx = DEVICE_ID_INVALID;
-				for (uint8_t i = 0; i < TOTAL_DEVICES; i++) {
-					if (AppConfig_GetFluidicLogicalID(i) == parsed.device_id) {
-						physical_idx = i;
-						break;
-					}
-				}
 
-				if (physical_idx == DEVICE_ID_INVALID) {
+				// --- 1. Маппинг логического ID в физический через единый модуль ---
+				DeviceMappingResult_t mapping = DeviceMapping_Resolve(parsed.device_id);
+
+				if (mapping.physical_id == DEVICE_ID_INVALID) {
 					CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_INVALID_DEVICE_ID);
 					continue;
-				}
+					}
 
-				// Формируем доменную команду
+				// --- 2. Формируем доменную команду ---
 				memset(&fluid_cmd, 0, sizeof(fluid_cmd));
 				fluid_cmd.cmd_code = parsed.cmd_code;
 				fluid_cmd.device_id = parsed.device_id;
+				fluid_cmd.physical_id = mapping.physical_id;
+				fluid_cmd.device_type = mapping.device_type;
 
-				// Определяем тип и индекс для контроллера (используем макросы из device_mapping.h)
-				if (physical_idx < NUM_PUMPS) {
-					fluid_cmd.device_type = DEVICE_TYPE_PUMP;
-					fluid_cmd.physical_id = physical_idx;
-				} else {
-					fluid_cmd.device_type = DEVICE_TYPE_VALVE;
-					fluid_cmd.physical_id = physical_idx - NUM_PUMPS;
-				}
+				// --- 3. Парсинг таймаута (байты 3-6 payload) ---
+				if (parsed.data_len >= 4)
+				{
+					fluid_cmd.timeout_ms = (uint32_t)(parsed.data[1] |
+							((uint32_t)parsed.data[2] << 8) |
+							((uint32_t)parsed.data[3] << 16) |
+							((uint32_t)parsed.data[4] << 24));
+					}
 
-				// Определяем целевое состояние
-				if (parsed.cmd_code == CAN_CMD_PUMP_START || parsed.cmd_code == CAN_CMD_VALVE_OPEN) {
+				// --- 4. Специальная логика для RUN_DURATION (0x0201) ---
+				if (parsed.cmd_code == CAN_CMD_PUMP_RUN_DURATION && fluid_cmd.timeout_ms == 0)
+				{
+					CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_INVALID_KEY); // Ошибка: таймаут не указан
+					continue;
+					}
+
+				// --- 5. Определяем целевое состояние ---
+				if (parsed.cmd_code == CAN_CMD_PUMP_START ||
+						parsed.cmd_code == CAN_CMD_VALVE_OPEN ||
+						parsed.cmd_code == CAN_CMD_PUMP_RUN_DURATION)
+					{
 					fluid_cmd.state = true;
-				} else {
+					}
+				else
+				{
 					fluid_cmd.state = false;
-				}
+					}
 
-				// Валидация типа устройства (защита от неверных команд для типа устройства)
+				// --- 6. Валидация типа устройства ---
 				bool is_valve_cmd = (parsed.cmd_code == CAN_CMD_VALVE_OPEN || parsed.cmd_code == CAN_CMD_VALVE_CLOSE);
-				bool is_pump_cmd = (parsed.cmd_code == CAN_CMD_PUMP_START || parsed.cmd_code == CAN_CMD_PUMP_STOP);
-
-				if ((fluid_cmd.device_type == DEVICE_TYPE_PUMP && is_valve_cmd) || 
-                    (fluid_cmd.device_type == DEVICE_TYPE_VALVE && is_pump_cmd)) {
+				bool is_pump_cmd = (parsed.cmd_code == CAN_CMD_PUMP_START || parsed.cmd_code == CAN_CMD_PUMP_STOP || parsed.cmd_code == CAN_CMD_PUMP_RUN_DURATION);
+				if ((fluid_cmd.device_type == DEVICE_TYPE_PUMP && is_valve_cmd) ||
+						(fluid_cmd.device_type == DEVICE_TYPE_VALVE && is_pump_cmd))
+				{
 					CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_INVALID_DEVICE_ID);
 					continue;
-				}
-
-				// Отправляем исполнителю
+					}
+				// --- 7. Отправляем исполнителю ---
 				osMessageQueuePut(fluidics_queueHandle, &fluid_cmd, 0, 0);
 				break;
 			}

@@ -69,6 +69,7 @@ typedef struct {
 	uint16_t cmd_code;      // Для ACK/NACK/DONE
 	uint8_t  device_id;     // Логический ID (для DONE)
 	bool     state;         // true=ON/OPEN, false=OFF/CLOSE
+	uint32_t timeout_ms;    // Таймаут безопасности (0 = бесконечно или по умолчанию)
 } PumpValveCommand_t;
 
 /**

@@ -27,9 +27,6 @@ void app_start_task_pump_controller(void *argument)
 			continue;
 			}
 
-		// Подтверждение приёма команды
-		CAN_SendAck(cmd.cmd_code);
-
 		// Исполнение: управление GPIO
 		if (cmd.device_type == DEVICE_TYPE_PUMP) {
 			PumpsValves_SetPumpState(cmd.physical_id, cmd.state);
