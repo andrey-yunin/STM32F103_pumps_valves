@@ -17,6 +17,8 @@
 #include "app_queues.h"
 #include "app_config.h"
 #include "can_protocol.h"
+#include <string.h>
+
 
 // --- Внешние хэндлы HAL ---
 extern CAN_HandleTypeDef hcan;
@@ -28,11 +30,13 @@ extern CAN_HandleTypeDef hcan;
 void CAN_SendAck(uint16_t cmd_code)
 {
 	CanTxFrame_t tx;
+	memset(tx.data, 0, 8); // Важно!
+
     tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_ACK,
                                       CAN_ADDR_CONDUCTOR, AppConfig_GetPerformerID());
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
-    tx.header.DLC = 2;
+    tx.header.DLC = 8; // Строго 8
     tx.data[0] = (uint8_t)(cmd_code & 0xFF);
     tx.data[1] = (uint8_t)((cmd_code >> 8) & 0xFF);
 
@@ -43,11 +47,13 @@ void CAN_SendAck(uint16_t cmd_code)
 void CAN_SendNackPublic(uint16_t cmd_code, uint16_t error_code)
 {
 	CanTxFrame_t tx;
+    memset(tx.data, 0, 8); // Унификация: зануляем всё
+
 	tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_NACK,
                                       CAN_ADDR_CONDUCTOR, AppConfig_GetPerformerID());
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
-    tx.header.DLC = 4;
+    tx.header.DLC = 8;
     tx.data[0] = (uint8_t)(cmd_code & 0xFF);
     tx.data[1] = (uint8_t)((cmd_code >> 8) & 0xFF);
     tx.data[2] = (uint8_t)(error_code & 0xFF);
@@ -60,11 +66,13 @@ void CAN_SendNackPublic(uint16_t cmd_code, uint16_t error_code)
 void CAN_SendDone(uint16_t cmd_code, uint8_t device_id)
 {
 	CanTxFrame_t tx;
+	memset(tx.data, 0, 8); // Унификация: зануляем всё
+
     tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_DATA_DONE_LOG,
     		CAN_ADDR_CONDUCTOR, AppConfig_GetPerformerID());
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
-    tx.header.DLC = 4;
+    tx.header.DLC = 8;
     tx.data[0] = CAN_SUB_TYPE_DONE;
     tx.data[1] = (uint8_t)(cmd_code & 0xFF);
     tx.data[2] = (uint8_t)((cmd_code >> 8) & 0xFF);
@@ -78,6 +86,7 @@ void CAN_SendDone(uint16_t cmd_code, uint8_t device_id)
 void CAN_SendData(uint16_t cmd_code, uint8_t *data, uint8_t len)
 {
 	CanTxFrame_t tx;
+	memset(tx.data, 0, 8); // Унификация: зануляем всё
 	tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_DATA_DONE_LOG,
 			CAN_ADDR_CONDUCTOR, AppConfig_GetPerformerID());
 	tx.header.IDE = CAN_ID_EXT;
@@ -160,7 +169,10 @@ void app_start_task_can_handler(void *argument)
     				 }
 
     			 if (CAN_GET_MSG_TYPE(can_id) != CAN_MSG_TYPE_COMMAND) continue;
-    			 if (rx_frame.header.DLC < 3) continue;
+
+
+    			 // Стало (Directive 2.0):
+    			 if (rx_frame.header.DLC != 8) continue;
 
 
     			 // Упаковка в ParsedCanCommand_t

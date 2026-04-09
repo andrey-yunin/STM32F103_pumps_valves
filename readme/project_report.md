@@ -11,4 +11,4 @@
 - **Архитектура** — `executor_architecture_guide.md` (общая для всех исполнителей)
 - **План рефакторинга** — `refactoring_plan.md`
 - **Отчёт о работе** — `PUMPS_VALVES_EXECUTOR_REPORT.md`
-- **Интерфейс дирижера** — `conductor_interface/` (can_packer.h, device_mapping.h)
+- **Интерфейс дирижера** — `CONDUCTOR_INTEGRATION_GUIDE.md` (валидация и протокол)

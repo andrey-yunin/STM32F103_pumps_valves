@@ -62,10 +62,10 @@ void app_start_task_dispatcher(void *argument)
 				fluid_cmd.physical_id = mapping.physical_id;
 				fluid_cmd.device_type = mapping.device_type;
 
-				// --- 3. Парсинг таймаута (байты 3-6 payload) ---
+				// --- 3. Парсинг таймаута (байты 3-6 payload -> data[0-3]) --
 				if (parsed.data_len >= 4)
 				{
-					fluid_cmd.timeout_ms = (uint32_t)(parsed.data[1] |
+					fluid_cmd.timeout_ms = (uint32_t)(parsed.data[0] |
 							((uint32_t)parsed.data[2] << 8) |
 							((uint32_t)parsed.data[3] << 16) |
 							((uint32_t)parsed.data[4] << 24));

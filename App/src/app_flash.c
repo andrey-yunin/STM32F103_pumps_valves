@@ -60,9 +60,9 @@ static void LoadDefaults(void) {
     g_app_config.magic = APP_CONFIG_MAGIC;
     g_app_config.performer_id = CAN_ADDR_PUMP_BOARD; // По умолчанию 0x30
 
-    // Дефолтный маппинг: 10, 11... 25 (Насосы 10-22, Клапаны 23-25)
+   // Дефолтный маппинг: 0, 1... 15 (Директива 2.0: Насосы 0-12, Клапаны 13-15)
     for (uint8_t i = 0; i < 16; i++) {
-        g_app_config.device_map[i] = 10 + i;
+        g_app_config.device_map[i] = i;
     }
     g_app_config.checksum = CalculateCRC16(&g_app_config);
 }
