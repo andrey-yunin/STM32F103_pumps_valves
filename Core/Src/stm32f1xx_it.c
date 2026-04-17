@@ -222,7 +222,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 		osMessageQueuePut(can_rx_queueHandle, &rx_frame, 0, 0);
 		osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_RX);
 		}
-}
+	}
 
 
 /* USER CODE END 1 */

@@ -14,8 +14,22 @@
 | Тактирование | HSI 8 МГц -> PLL x16 -> SYSCLK 64 МГц |
 | APB1 | 32 МГц (для CAN) |
 | APB2 | 64 МГц |
-| CAN | bxCAN, 500 кбит/с, 29-bit Extended ID |
+| CAN | bxCAN, 1 Мбит/с, 29-bit Extended ID, strict DLC=8 |
 | RTOS | FreeRTOS, CMSIS_V2 |
+
+### 2.1. CAN Bit Timing
+
+Текущий профиль синхронизирован с DDS-240 Conductor и остальными исполнителями:
+
+| Параметр | Значение |
+|:---------|:---------|
+| APB1 CAN clock | 32 МГц |
+| Prescaler | 2 |
+| BS1 | 11 TQ |
+| BS2 | 4 TQ |
+| SJW | 1 TQ |
+| Расчетная скорость | 1 Мбит/с |
+| Sample point | 75% |
 
 ## 3. Распиновка GPIO
 
@@ -49,8 +63,8 @@
 
 | Сигнал | Пин |
 |:-------|:----|
-| CAN_RX | PB8 |
-| CAN_TX | PB9 |
+| CAN_RX | PA11 |
+| CAN_TX | PA12 |
 
 ### 3.4. Прочее
 
@@ -94,18 +108,45 @@
 2. **Строгий транспорт**: Переход на фиксированный DLC=8 для всех транзакций. Это повышает предсказуемость шины и упрощает аппаратную фильтрацию.
 3. **Payload Alignment**: Исправлено смещение параметров. Теперь `timeout_ms` передается в байтах 3-6 кадра, что соответствует общему стандарту экосистемы.
 
+## 4.8. Фаза 8: Стендовая верификация CAN с CANable (17.04.2026)
+
+Проведена проверка реальной CAN-связи платы Fluidics через CANable под Linux Mint.
+
+**Выполненные изменения и фиксации:**
+1. **Скорость шины синхронизирована с экосистемой**: CAN переведен на 1 Мбит/с (`Prescaler=2`, `BS1=11TQ`, `BS2=4TQ`, APB1=32 МГц).
+2. **Вызов `AppConfig_Init()` закреплен в USER CODE-блоке** после `osKernelInitialize()` и до создания задач, чтобы генерация CubeMX не удаляла инициализацию Flash-конфига.
+3. **Уточнена фактическая распиновка CAN**: текущая прошивка и стендовая плата используют `PA11=CAN_RX`, `PA12=CAN_TX`.
+4. **Добавлен пользовательский тестовый скрипт** `App_users/can_fluidics_test.sh` для проверки CANable/SocketCAN на 1 Мбит/с.
+
+**Подтвержденные транзакции на 1 Мбит/с:**
+- `GET_DEVICE_INFO (0xF001)`: получены `ACK`, три `DATA`-кадра и `DONE`.
+- `PUMP_START (0x0202), channel 0`: получены `ACK` и `DONE`.
+- `PUMP_STOP (0x0203), channel 0`: получены `ACK` и `DONE`.
+
+**Контрольный профиль SocketCAN:**
+```bash
+ip link set can0 type can bitrate 1000000 sample-point 0.750 restart-ms 100 loopback off
+```
+
+**Эталонные команды проверки:**
+```bash
+./App_users/can_fluidics_test.sh setup
+./App_users/can_fluidics_test.sh info
+./App_users/can_fluidics_test.sh pump-cycle 0 1
+```
+
 ## 5. Таблица текущего состояния компонентов
 
 | Component | Status |
 |:----------|:-------|
 | GPIO насосов/клапанов | ВЫПОЛНЕНО (модуль `pumps_valves_gpio`) |
 | Архитектура задач (DDS-240) | ВЫПОЛНЕНО (`task_dispatcher`, `fluidics_queueHandle`) |
-| CAN-транспорт (Advanced) | ВЫПОЛНЕНО (Mailbox Guard, Dynamic ID) |
+| CAN-транспорт (Advanced) | ВЫПОЛНЕНО И ПРОВЕРЕНО (1 Мбит/с, Extended ID, DLC=8, Mailbox Guard, Dynamic ID) |
 | Сервисный слой (0xFxxx) | ВЫПОЛНЕНО (INFO, REBOOT, FLASH, UID, RESET) |
-| Унификация (Directive 2.0)| В ПРОЦЕССЕ (0-based ID, DLC=8) |
+| Унификация (Directive 2.0)| ВЫПОЛНЕНО И ПРОВЕРЕНО (0-based ID, DLC=8) |
 
 ## 6. Реестр логических устройств (Device Registry)
-(Диапазон 10-25, маппинг динамический)
+(Локальные индексы 0-15, маппинг динамический)
 
 ### 6.1. Реестр по Директиве 2.0 (Локальные индексы)
 | Логический ID (Index) | Тип | Физический канал |
@@ -148,13 +189,6 @@
 
 ---
 
-**Текущий статус**: "Advanced Fluidics Logic Compliant. Ready for Verification."
+**Текущий статус**: "Fluidics Executor CAN transport verified at 1 Mbit/s. Ready for extended channel verification."
 
-*Документ обновлён: 08.04.2026*
-яется.
-
----
-
-**Текущий статус**: "Service Layer Fully Compliant. Safety Logic Implementation in Progress."
-
-*Документ обновлён: 08.04.2026*
+*Документ обновлён: 17.04.2026*
