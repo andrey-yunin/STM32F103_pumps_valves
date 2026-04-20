@@ -50,7 +50,7 @@
 
 ### 1.3.1. Насосы (Pumps 0-12)
 - **Индексы 0-12**: Соответствуют физическим насосам платы.
-- **Команды**: `START (0x0202)`, `STOP (0x0203)`. `RUN_DURATION (0x0201)` зарезервирована для сценариев с явной длительностью.
+- **Команды**: `START (0x0202)`, `STOP (0x0203)`, `RUN_DURATION (0x0201)` для запуска на заданное время.
 
 ### 1.3.2. Клапаны (Valves 13-15)
 - **Индексы 13-15**: Соответствуют физическим клапанам платы.
@@ -60,7 +60,7 @@
 
 | Код | Команда | Параметры (байты 3-6) | Описание |
 |:----|:--------|:----------------------|:---------|
-| `0x0201` | **RUN_DURATION**| `timeout` (uint32, LE) | Зарезервировано для запуска на время; до отдельной проверки использовать `START -> WAIT_MS -> STOP`. |
+| `0x0201` | **RUN_DURATION**| `timeout` (uint32, LE) | Запуск насоса на время. `timeout=0` невалиден. |
 | `0x0202` | **PUMP_START**  | `timeout` (uint32, LE) | Вкл. Насос. 0 = Default (60с). |
 | `0x0203` | **PUMP_STOP**   | - | Выкл. Насос. |
 | `0x0204` | **VALVE_OPEN**  | `timeout` (uint32, LE) | Открыть клапан. 0 = Default (300с). |
@@ -83,14 +83,34 @@
 2. **ACK (0x01)**: Дирижер должен получить подтверждение приема в течение **50 мс**.
 3. **DONE (0x03, Sub:0x01)**: Дирижер ожидает сигнал завершения.
    - Для `START/STOP/OPEN/CLOSE` — в течение **100 мс** после ACK, после установки GPIO и таймера безопасности.
-   - Для `RUN_DURATION` — зарезервировано; до отдельной проверки Дирижеру рекомендуется использовать сценарий `START -> WAIT_MS -> STOP`.
+   - Для `RUN_DURATION` — в течение **100 мс** после ACK, после установки GPIO и таймера безопасности. Фактическое автоотключение по таймеру не сопровождается отдельным DONE.
+
+### 1.5.1. Transport timeout policy
+
+Плата Fluidics не отправляет `NACK` на невалидную транспортную оболочку. Кадры с `DLC != 8`, не Extended ID, чужим `DstAddr` или не `COMMAND` типом игнорируются без ответа. Дирижер обязан обрабатывать это как отсутствие `ACK` в окне ожидания и применять свою retry/fault policy.
+
+`NACK` используется только для транспортно валидных `COMMAND`-кадров с `DLC=8`, когда ошибка относится к прикладному уровню: неизвестная команда, неверный индекс, неверный тип ресурса, неверный Magic Key.
+
+### 1.5.2. Промышленное послание Дирижеру
+
+До закрытия промышленного блока Fluidics Дирижер должен учитывать следующие ограничения и обязанности:
+
+- **Non-zero timeout**: `PUMP_START` с ненулевым timeout проверен на физической нагрузке; timeout кодируется как `uint32_t` Little-Endian в payload bytes 3-6 (`parsed.data[0..3]`).
+- **RUN_DURATION**: `0x0201 RUN_DURATION` с ненулевым timeout проверен на физической нагрузке. `DONE` подтверждает старт GPIO/таймера, а не момент последующего автоотключения.
+- **Zero timeout policy**: для `START/OPEN` timeout `0` означает default safety timeout исполнителя; для `RUN_DURATION` timeout `0` невалиден.
+- **Safety timer failure policy**: если исполнитель не смог создать или запустить safety timer, нагрузка должна остаться/вернуться в `OFF`, а транзакция завершиться `NACK`, без `DONE`.
+- **Operation supervision**: Дирижер обязан иметь собственный верхний timeout операции. Safety timeout исполнителя является последним уровнем защиты железа, но не заменяет контроль сценария на стороне Дирижера.
+- **No ACK**: отсутствие `ACK` в окне ожидания трактуется как transport/protocol timeout. Это не `NACK`; Дирижер применяет retry/fault policy.
+- **SET_NODE_ID transition**: текущая Fluidics-реализация отправляет `ACK` со старого NodeID, а `DONE` уже с нового NodeID. Дирижер должен принять оба адреса в рамках этой транзакции.
+- **COMMIT/REBOOT/FACTORY_RESET**: после этих сервисных команд Дирижер должен ожидать временную потерю связи, затем выполнять повторный discovery (`0xF001`) и сверку NodeID/UID.
+- **GET_STATUS**: Дирижер должен поддержать `0xF007` как общий диагностический запрос Executor-плат. Ответ состоит из DATA-метрик `metric_id:uint16 LE + value:uint32 LE`, затем `DONE`.
 
 ## 1.6. Требования к валидации на стороне Дирижера
 
 ### 1.6.1. Предотвращение ошибок (Safety First)
 - **Type Check**: Дирижеру запрещено отправлять команду `PUMP_START` на `ID 13` (клапан). Исполнитель вернет `NACK (0x0002)`.
 - **Zero Duration**: Команда `0x0201` (RUN_DURATION) с `timeout = 0` является невалидной.
-- **DLC Check**: Кадры с `DLC != 8` текущая прошивка отбрасывает на транспортном уровне без ACK/NACK.
+- **DLC Check**: Кадры с `DLC != 8` текущая прошивка отбрасывает на транспортном уровне без ACK/NACK; Дирижер фиксирует это по ACK timeout.
 - **Timeout LE**: Ненулевой timeout должен кодироваться как `uint32_t` Little-Endian в байтах payload 3-6.
 
 ### 1.6.2. Сервисный аудит (Discovery)
@@ -101,6 +121,44 @@
 - Ответ: ACK `05103000`, три DATA-кадра `07103000`, затем DONE `07103000`.
 - Первый DATA payload: `02 80 03 FW_MAJOR FW_MINOR 10 UID0 UID1`.
 
+### 1.6.3. Диагностический статус `GET_STATUS (0xF007)`
+Дирижер отправляет:
+
+```bash
+cansend can0 00301000#07F0000000000000
+```
+
+Ожидаемый жизненный цикл: `ACK -> DATA... -> DONE`.
+
+Каждый DATA payload после первых двух служебных байтов имеет формат:
+
+```text
+02 80 metric_lo metric_hi value0 value1 value2 value3
+```
+
+Минимальный набор метрик Fluidics совпадает с общим стандартом DDS-240:
+
+| Metric ID | Значение |
+|:----------|:---------|
+| `0x0001` | RX frames accepted by transport task |
+| `0x0002` | TX frames submitted to HAL |
+| `0x0003` | RX queue overflow |
+| `0x0004` | TX queue overflow |
+| `0x0005` | Dispatcher queue overflow |
+| `0x0006` | Dropped frame: not Extended ID |
+| `0x0007` | Dropped frame: foreign destination |
+| `0x0008` | Dropped frame: non-COMMAND message type |
+| `0x0009` | Dropped frame: invalid executor DLC |
+| `0x000A` | TX mailbox guard timeout |
+| `0x000B` | `HAL_CAN_AddTxMessage` error |
+| `0x000C` | CAN error callback count |
+| `0x000D` | CAN error-warning count |
+| `0x000E` | CAN error-passive count |
+| `0x000F` | CAN bus-off count |
+| `0x0010` | Last HAL CAN error code |
+| `0x0011` | Last CAN ESR register snapshot |
+| `0x0012` | Application/domain queue overflow |
+
 ## 1.7. Коды ошибок NACK (Error Registry)
 | Код | Причина | Действие Дирижера |
 |:----|:--------|:------------------|
@@ -110,14 +168,32 @@
 | `0x0004` | Invalid Key | Проверить Magic Key сервисной команды. |
 | `0x0005` | Flash Error     | Ошибка записи настроек. |
 
+Для Fluidics код `0x0003` также может использоваться как отказ запуска нагрузки, если защитный таймер недоступен. В этом случае Дирижер не должен ждать `DONE` и обязан считать команду невыполненной.
+
 ## 1.8. Статус проверки Fluidics (17.04.2026)
 
 - CANable / Linux SocketCAN: PASS на 1 Mbit/s.
 - `GET_DEVICE_INFO (0xF001)`: получены ACK, 3 DATA, DONE.
 - `PUMP_START (0x0202)` и `PUMP_STOP (0x0203)` для канала 0: получены ACK и DONE.
+- 20.04.2026: проверена работа через пассивный CAN-switch, рассчитанный на подключение до 16 CAN-устройств.
+- 20.04.2026: причина предыдущего отказа локализована на физическом уровне - поврежденный разъем кабеля.
+- 20.04.2026: физическая нагрузка каналов 0 и 1 проверена командой `load-cycle 0 1 3 1 0.5`; кулеры вращались, индивидуальный и совместный режимы отработали.
+- После нагрузочного теста `can0` остался `ERROR-ACTIVE`, новые `bus-errors`, `bus-off`, RX/TX errors не появились.
+- 20.04.2026: NACK matrix basic PASS: неверный тип ресурса, индекс вне диапазона, неизвестная команда, неверный Magic Key.
+- 20.04.2026: Addressing PASS: чужой `DstAddr=0x20` игнорируется, broadcast `DstAddr=0x00` принимается.
+- 20.04.2026: `GET_UID (0xF004)` PASS; UID совпадает с фрагментами `GET_DEVICE_INFO`.
+- 20.04.2026: `SET_NODE_ID` в RAM PASS (`0x30 -> 0x31 -> 0x30`). Текущая реализация отправляет `ACK` со старого NodeID, а `DONE` уже с нового NodeID.
+- 20.04.2026: `REBOOT (0xF002)`, `COMMIT (0xF003)`, `SET_NODE_ID + COMMIT + REBOOT` persistence и `FACTORY_RESET (0xF006)` PASS; после финального reset плата отвечает на default `0x30`.
+- 20.04.2026: transport negative tests PASS: короткий DLC, Standard ID и non-COMMAND frame игнорируются без ACK/NACK.
 - Проект соответствует общей executor-архитектуре DDS-240 по CAN ID, NodeID, strict DLC=8, ACK/DONE, 0-based индексам, сервисному `0xF001`, FreeRTOS tasks/queues и Mailbox Guard.
-- До расширенного приемочного теста остаются: клапаны 13-15, NACK на неверный тип/индекс, сервисные команды `0xF002/0xF003/0xF005/0xF006`, ненулевые timeout/RUN_DURATION.
-- Аудит исходников выявил риск в разборе ненулевого timeout в `task_dispatcher.c`: байты payload 3-6 должны попадать в `parsed.data[0..3]`. До правки кода Дирижеру не следует полагаться на ненулевые timeout и `RUN_DURATION`.
+- 20.04.2026: исправлен и проверен разбор ненулевого timeout для `PUMP_START`; кадр `00301000#020200D007000000` включил нагрузку канала 0 и автоотключил ее примерно через 2 секунды.
+- 20.04.2026: `RUN_DURATION (0x0201)` с timeout `2000 ms` проверен кадром `00301000#010200D007000000`; нагрузка отработала штатно.
+- 20.04.2026: добавлен guard запуска safety timer: нагрузка включается только после успешного `osTimerStart()`. После изменения регрессия `GET_DEVICE_INFO`, `PUMP_START/STOP` и `RUN_DURATION 2000 ms` прошла штатно.
+- 20.04.2026: реализован safe-state hook `PumpsValves_AllOff()` для старта, `Error_Handler()` и fault handlers. После изменения регрессия `PUMP_START/STOP` и `RUN_DURATION 2000 ms` прошла штатно.
+- 20.04.2026: Flash config page `0x0800FC00..0x0800FFFF` исключена из области приложения в linker script (`FLASH LENGTH = 63K`); сборка прошла с запасом до reserved page.
+- 20.04.2026: post-flash runtime-регрессия `GET_INFO -> COMMIT -> REBOOT -> GET_INFO` PASS; после перезагрузки плата ответила на NodeID `0x30` с теми же UID-фрагментами.
+- До расширенного приемочного теста остаются: клапаны 13-15, физический прогон насосов 2-12, default safety timeout.
+- Промышленное доведение Fluidics должно закрыть: CAN diagnostic service `0xF007`, fault-injection отказа safety timer и fault handlers, IWDG.
 
 ---
 

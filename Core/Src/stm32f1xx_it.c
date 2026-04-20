@@ -26,6 +26,7 @@
 #include "cmsis_os.h"
 #include "app_queues.h" // Для can_rx_queueHandle
 #include "app_config.h" // Чтобы видеть CanFrame_t
+#include "pumps_valves_gpio.h"
 
 
 
@@ -59,6 +60,12 @@
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void EnterSafeFaultState(void)
+{
+	PumpsValves_AllOff();
+  	__disable_irq();
+  }
+
 
 /* USER CODE END 0 */
 
@@ -79,6 +86,7 @@ extern TIM_HandleTypeDef htim4;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
+	EnterSafeFaultState();
 
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
@@ -94,6 +102,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
+	EnterSafeFaultState();
 
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
@@ -109,6 +118,7 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
+	EnterSafeFaultState();
 
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
@@ -124,6 +134,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
+	EnterSafeFaultState();
 
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
@@ -139,6 +150,7 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
+	EnterSafeFaultState();
 
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)

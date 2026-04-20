@@ -37,7 +37,7 @@
 // =============================================================================
 
 #define CAN_RX_QUEUE_LEN            16
-#define CAN_TX_QUEUE_LEN            16
+#define CAN_TX_QUEUE_LEN            32
 #define DISPATCHER_QUEUE_LEN        10
 #define FLUIDICS_QUEUE_LEN          8
 

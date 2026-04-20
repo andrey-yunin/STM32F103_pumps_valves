@@ -55,6 +55,22 @@ void PumpsValves_SetValveState(uint8_t valve_idx, bool is_open)
 	}
 
 
+void PumpsValves_AllOff(void)
+{
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+  	__HAL_RCC_GPIOB_CLK_ENABLE();
+
+  	for (uint8_t i = 0; i < NUM_PUMPS; i++) {
+  		HAL_GPIO_WritePin(pump_ports[i], pump_pins[i], GPIO_PIN_RESET);
+  		}
+
+  	for (uint8_t i = 0; i < NUM_VALVES; i++) {
+  		HAL_GPIO_WritePin(valve_ports[i], valve_pins[i], GPIO_PIN_RESET);
+  	}
+  }
+
+
+
 
 
 

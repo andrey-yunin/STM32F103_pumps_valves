@@ -66,9 +66,9 @@ void app_start_task_dispatcher(void *argument)
 				if (parsed.data_len >= 4)
 				{
 					fluid_cmd.timeout_ms = (uint32_t)(parsed.data[0] |
-							((uint32_t)parsed.data[2] << 8) |
-							((uint32_t)parsed.data[3] << 16) |
-							((uint32_t)parsed.data[4] << 24));
+							((uint32_t)parsed.data[1] << 8) |
+							((uint32_t)parsed.data[2] << 16) |
+							((uint32_t)parsed.data[3] << 24));
 					}
 
 				// --- 4. Специальная логика для RUN_DURATION (0x0201) ---

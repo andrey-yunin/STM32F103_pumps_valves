@@ -28,6 +28,7 @@ Usage:
   $0 pump-start <0..12>
   $0 pump-stop <0..12>
   $0 pump-cycle <0..12> [seconds]
+  $0 load-cycle <0..15> <0..15> [cycles=3] [hold_sec=1] [pause_sec=0.5]
   $0 valve-open <13..15>
   $0 valve-close <13..15>
   $0 send <can_id_hex> <data_hex_8_bytes>
@@ -175,6 +176,117 @@ check_range() {
     fi
 }
 
+check_positive_int() {
+    local value="$1"
+    local name="$2"
+
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || (( value < 1 )); then
+        echo "${name} must be a positive integer" >&2
+        exit 1
+    fi
+}
+
+check_delay() {
+    local value="$1"
+    local name="$2"
+
+    if ! [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        echo "${name} must be a non-negative number" >&2
+        exit 1
+    fi
+}
+
+start_device() {
+    local dev="$1"
+
+    check_range "$dev" 0 15 "load index"
+    if (( dev <= 12 )); then
+        echo "START load ${dev} as pump"
+        send_command "$CMD_PUMP_START" "$dev"
+    else
+        echo "OPEN load ${dev} as valve"
+        send_command "$CMD_VALVE_OPEN" "$dev"
+    fi
+}
+
+stop_device() {
+    local dev="$1"
+
+    check_range "$dev" 0 15 "load index"
+    if (( dev <= 12 )); then
+        echo "STOP load ${dev} as pump"
+        send_command "$CMD_PUMP_STOP" "$dev"
+    else
+        echo "CLOSE load ${dev} as valve"
+        send_command "$CMD_VALVE_CLOSE" "$dev"
+    fi
+}
+
+LOAD_CLEANUP_FIRST=""
+LOAD_CLEANUP_SECOND=""
+
+cleanup_load_cycle() {
+    if [[ -n "$LOAD_CLEANUP_FIRST" || -n "$LOAD_CLEANUP_SECOND" ]]; then
+        echo "Cleanup: stopping configured loads" >&2
+        if [[ -n "$LOAD_CLEANUP_FIRST" ]]; then
+            stop_device "$LOAD_CLEANUP_FIRST" >/dev/null 2>&1 || true
+        fi
+        if [[ -n "$LOAD_CLEANUP_SECOND" ]]; then
+            stop_device "$LOAD_CLEANUP_SECOND" >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
+run_load_cycle() {
+    local first="$1"
+    local second="$2"
+    local cycles="${3:-3}"
+    local hold_sec="${4:-1}"
+    local pause_sec="${5:-0.5}"
+    local cycle
+
+    check_range "$first" 0 15 "first load index"
+    check_range "$second" 0 15 "second load index"
+    check_positive_int "$cycles" "cycles"
+    check_delay "$hold_sec" "hold_sec"
+    check_delay "$pause_sec" "pause_sec"
+
+    if (( first == second )); then
+        echo "load indexes must be different" >&2
+        exit 1
+    fi
+
+    LOAD_CLEANUP_FIRST="$first"
+    LOAD_CLEANUP_SECOND="$second"
+    trap cleanup_load_cycle EXIT INT TERM
+
+    for ((cycle = 1; cycle <= cycles; cycle++)); do
+        echo "=== cycle ${cycle}/${cycles}: load ${first} ==="
+        start_device "$first"
+        sleep "$hold_sec"
+        stop_device "$first"
+        sleep "$pause_sec"
+
+        echo "=== cycle ${cycle}/${cycles}: load ${second} ==="
+        start_device "$second"
+        sleep "$hold_sec"
+        stop_device "$second"
+        sleep "$pause_sec"
+
+        echo "=== cycle ${cycle}/${cycles}: loads ${first}+${second} ==="
+        start_device "$first"
+        start_device "$second"
+        sleep "$hold_sec"
+        stop_device "$first"
+        stop_device "$second"
+        sleep "$pause_sec"
+    done
+
+    trap - EXIT INT TERM
+    LOAD_CLEANUP_FIRST=""
+    LOAD_CLEANUP_SECOND=""
+}
+
 main() {
     require_tool cansend
     require_tool candump
@@ -202,6 +314,9 @@ main() {
             send_command "$CMD_PUMP_START" "$2"
             sleep "$delay_sec"
             send_command "$CMD_PUMP_STOP" "$2"
+            ;;
+        load-cycle)
+            run_load_cycle "${2:-}" "${3:-}" "${4:-3}" "${5:-1}" "${6:-0.5}"
             ;;
         valve-open)
             check_range "${2:-}" 13 15 "valve index"

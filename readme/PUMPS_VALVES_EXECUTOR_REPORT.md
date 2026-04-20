@@ -87,7 +87,7 @@
 **Выполненные исправления:**
 1. **Устранено дублирование ACK**: Теперь `ACK` отправляется только в Диспетчере.
 2. **Унифицирован маппинг**: Модуль `device_mapping.c` переведен на динамическую работу через `AppConfig`.
-3. **Доработан парсинг**: Диспетчер извлекает `timeout_ms` и поддерживает команду `RUN_DURATION`.
+3. **Исправлен парсинг timeout**: Диспетчер собирает `timeout_ms` как `uint32_t LE` из payload bytes 3-6; `PUMP_START` и `RUN_DURATION` с ненулевым timeout проверены на физической нагрузке.
 
 **Чек-лист соответствия (Compliance Checklist):**
 - [x] **Архитектура**: Имена задач соответствуют стандарту (`task_dispatcher`).
@@ -97,7 +97,7 @@
 - [x] **Транспорт**: Mailbox Guard и Broadcast (ID 0x00) реализованы.
 - [x] **Сервисный слой**: Поддержка команд `0xF0xx` в Диспетчере полностью внедрена.
 - [x] **Fluidics (Advanced)**: Реализованы защитные таймауты (Safety Timeout) через ПО-таймеры.
-- [x] **Fluidics (Advanced)**: Реализована команда `0x0201` (RUN_DURATION).
+- [x] **Fluidics (Advanced)**: Команда `0x0201` (RUN_DURATION) проверена стендовым тестом с timeout `2000 ms`.
 - [x] **Fluidics (Advanced)**: Устранено дублирование ACK в транзакциях.
 
 ## 4.7. Фаза 7: Переход на Директиву 2.0 (09.04.2026)
@@ -106,7 +106,7 @@
 **Ключевые изменения:**
 1. **Модель ресурсов**: Отказ от глобальных ID (10-25) в пользу локальных индексов каналов (0-15). Плата теперь является абстрактным пулом насосов (0-12) и клапанов (13-15).
 2. **Строгий транспорт**: Переход на фиксированный DLC=8 для всех транзакций. Это повышает предсказуемость шины и упрощает аппаратную фильтрацию.
-3. **Payload Alignment**: Исправлено смещение параметров. Теперь `timeout_ms` передается в байтах 3-6 кадра, что соответствует общему стандарту экосистемы.
+3. **Payload Alignment**: `timeout_ms` передается в байтах 3-6 кадра (`uint32_t LE`). Исправление проверено кадрами `00301000#020200D007000000` и `00301000#010200D007000000`: нагрузка канала 0 отработала примерно 2 секунды и отключилась автоматически.
 
 ## 4.8. Фаза 8: Стендовая верификация CAN с CANable (17.04.2026)
 
@@ -135,15 +135,115 @@ ip link set can0 type can bitrate 1000000 sample-point 0.750 restart-ms 100 loop
 ./App_users/can_fluidics_test.sh pump-cycle 0 1
 ```
 
+## 4.9. Фаза 9: Проверка через CAN-switch и физическую нагрузку (20.04.2026)
+
+Проведена стендовая проверка через пассивный CAN-switch, рассчитанный на подключение до 16 CAN-устройств. Предыдущий отказ связи был локализован на физическом уровне: поврежден разъем кабеля. После устранения дефекта плата стабильно отвечает через switch.
+
+**Топология стенда:**
+```text
+CANable -> passive CAN switch -> Fluidics executor -> physical loads
+```
+
+**Команда проверки нагрузки:**
+```bash
+./App_users/can_fluidics_test.sh load-cycle 0 1 3 1 0.5
+```
+
+**Результат:**
+- Выполнено 3 полных цикла.
+- Канал 0: `PUMP_START` / `PUMP_STOP`, получены `ACK` и `DONE`, физическая нагрузка включалась и выключалась.
+- Канал 1: `PUMP_START` / `PUMP_STOP`, получены `ACK` и `DONE`, физическая нагрузка включалась и выключалась.
+- Совместный режим `0+1`: обе нагрузки включались одновременно и штатно останавливались.
+- Физическая нагрузка: кулеры, вращение подтверждено визуально.
+- После теста шина осталась в состоянии `ERROR-ACTIVE`.
+- Новые `bus-errors`, `bus-off`, RX/TX errors не появились.
+- Счетчики `error-warn=89` и `error-pass=23` не увеличились после дополнительного обмена; считаются следом прежних экспериментов с поврежденным разъемом.
+
+**Вывод:** базовая работа GPIO-выходов под физической нагрузкой для каналов 0 и 1 подтверждена. CAN-транспорт через пассивный switch на 1 Мбит/с подтвержден для текущей стендовой топологии.
+
+## 4.10. Фаза 10: Логические CAN-тесты без изменения физики (20.04.2026)
+
+Проведены проверки ошибок, адресации и сервисного слоя без подключения дополнительных физических каналов.
+
+**NACK matrix:**
+- `PUMP_START (0x0202)` на клапанный индекс `13` -> `ACK` + `NACK 0x0002`.
+- `VALVE_OPEN (0x0204)` на насосный индекс `0` -> `ACK` + `NACK 0x0002`.
+- `PUMP_START (0x0202)` на индекс `16` вне диапазона -> `ACK` + `NACK 0x0002`.
+- Неизвестная команда `0x9999` -> `ACK` + `NACK 0x0001`.
+- `REBOOT (0xF002)` с неверным ключом -> `ACK` + `NACK 0x0004`.
+- `FACTORY_RESET (0xF006)` с неверным ключом -> `ACK` + `NACK 0x0004`.
+
+**Адресация:**
+- Команда `GET_DEVICE_INFO` на чужой `DstAddr=0x20` проигнорирована без ответа.
+- Broadcast `DstAddr=0x00` принят; получены `ACK`, три `DATA`-кадра и `DONE` от Fluidics.
+
+**Read-only service:**
+- `GET_UID (0xF004)` вернул `ACK`, два `DATA`-кадра и `DONE`.
+- UID `48 FF 6A 06 49 85 70 54 25 58 15 67` совпадает с UID-фрагментами из `GET_DEVICE_INFO`.
+
+**SET_NODE_ID без COMMIT:**
+- `0x30 -> 0x31`: старый адрес перестал отвечать, новый адрес `0x31` ответил на `GET_DEVICE_INFO`.
+- `0x31 -> 0x30`: адрес успешно возвращен, `0x30` снова ответил на `GET_DEVICE_INFO`.
+- Особенность текущей реализации: для `SET_NODE_ID` `ACK` отправляется со старого NodeID, а `DONE` уже с нового NodeID.
+
+**Persistence и reset:**
+- `REBOOT (0xF002)` с ключом `0x55AA` -> `ACK` + `DONE`; после перезагрузки плата отвечает на `0x30`.
+- `COMMIT (0xF003)` -> `ACK` + `DONE`; путь записи Flash завершен без `NACK`.
+- `SET_NODE_ID + COMMIT + REBOOT`: адрес `0x30 -> 0x31` сохранен во Flash и пережил перезагрузку.
+- Возврат `0x31 -> 0x30` + `COMMIT` + `REBOOT`: default-адрес `0x30` восстановлен и пережил перезагрузку.
+- `FACTORY_RESET (0xF006)` с ключом `0xDEAD` -> `ACK` + `DONE`; после reinit плата отвечает на default `0x30`.
+
+**Transport negative tests:**
+- `DLC != 8` (`00301000#01F0`) -> silent drop, без `ACK/NACK`.
+- Standard 11-bit ID (`123#...`) -> silent drop, без `ACK/NACK`.
+- Не `COMMAND` message type (`01301000#...`) -> silent drop, без `ACK/NACK`.
+- Недопустимые `SET_NODE_ID` значения `0x00/0x01/0x10/0x80` -> `ACK` + `NACK 0x0001`.
+
+**Non-zero timeout:**
+- `PUMP_START (0x0202)` канал `0`, timeout `2000 ms`: `00301000#020200D007000000`.
+- Получены `ACK` и `DONE`, физическая нагрузка включилась и автоматически отключилась примерно через 2 секунды.
+- Дополнительный `DONE` при safety auto-off не отправляется по текущей логике.
+
+**RUN_DURATION:**
+- `RUN_DURATION (0x0201)` канал `0`, timeout `2000 ms`: `00301000#010200D007000000`.
+- Получены `ACK` и `DONE`, физическая нагрузка отработала штатно.
+- Семантика для Дирижера: `DONE` подтверждает старт GPIO/таймера; момент автоотключения отдельным `DONE` не подтверждается.
+
+**Safety timer start guard:**
+- Логика включения нагрузки изменена: GPIO переводится в `ON` только после успешного запуска safety timer.
+- Если таймер канала отсутствует или `osTimerStart()` возвращает ошибку, канал принудительно остается/возвращается в `OFF`.
+- В отказной ветке отправляется `NACK 0x0003`, `DONE` не отправляется.
+- После изменения выполнена регрессия: `GET_DEVICE_INFO`, `PUMP_START/STOP` и `RUN_DURATION 2000 ms` отработали штатно.
+
+**Safe-state hook:**
+- Реализован `PumpsValves_AllOff()`: все насосы и клапаны переводятся в `OFF`.
+- Hook вызывается после `MX_GPIO_Init()`/`MX_CAN_Init()` в пользовательском блоке CubeMX до создания очередей и старта задач.
+- `Error_Handler()` вызывает hook до `__disable_irq()`.
+- `NMI`, `HardFault`, `MemManage`, `BusFault`, `UsageFault` вызывают hook через `EnterSafeFaultState()` до входа в аварийный цикл.
+- После изменения выполнена регрессия: `PUMP_START/STOP` и `RUN_DURATION 2000 ms` сохранили штатные ответы `ACK/DONE`.
+- Controlled fault-injection для входа в fault handlers не выполнялся на рабочей плате.
+
+**Flash safety:**
+- Конфигурация хранится на последней странице STM32F103C8 Flash: `0x0800FC00..0x0800FFFF`.
+- Linker script ограничивает область приложения до `63K`, поэтому код и `.rodata` не размещаются в странице, которую стирает `COMMIT/FACTORY_RESET`.
+- Сборка после изменения прошла: `text=32308`, `data=96`, `bss=9848`.
+- Runtime-регрессия после прошивки PASS: `GET_INFO`, `COMMIT`, `REBOOT`, затем повторный `GET_INFO` на NodeID `0x30` с теми же UID-фрагментами.
+
+**Состояние шины после тестов:** `ERROR-ACTIVE`, новые `bus-errors`, `bus-off`, RX/TX errors не появились; `error-warn=89` и `error-pass=23` не увеличились.
+
 ## 5. Таблица текущего состояния компонентов
 
 | Component | Status |
 |:----------|:-------|
 | GPIO насосов/клапанов | ВЫПОЛНЕНО (модуль `pumps_valves_gpio`) |
 | Архитектура задач (DDS-240) | ВЫПОЛНЕНО (`task_dispatcher`, `fluidics_queueHandle`) |
-| CAN-транспорт (Advanced) | ВЫПОЛНЕНО И ПРОВЕРЕНО (1 Мбит/с, Extended ID, DLC=8, Mailbox Guard, Dynamic ID) |
-| Сервисный слой (0xFxxx) | ВЫПОЛНЕНО (INFO, REBOOT, FLASH, UID, RESET) |
+| CAN-транспорт (Advanced) | ВЫПОЛНЕНО И ПРОВЕРЕНО (1 Мбит/с, Extended ID, DLC=8, Mailbox Guard, Dynamic ID, passive CAN-switch) |
+| Сервисный слой (0xFxxx) | ПРОВЕРЕНО НА СТЕНДЕ (INFO, GET_UID, REBOOT, COMMIT, SET_NODE_ID RAM/PERSISTENCE, FACTORY_RESET, invalid-key NACK) |
 | Унификация (Directive 2.0)| ВЫПОЛНЕНО И ПРОВЕРЕНО (0-based ID, DLC=8) |
+| Safety timer guard | РЕАЛИЗОВАНО, РЕГРЕССИЯ PASS (нагрузка включается только после успешного запуска таймера; fault-injection отказа таймера еще не выполнен) |
+| Safe-state hook | РЕАЛИЗОВАНО, РЕГРЕССИЯ PASS (AllOff при старте, Error_Handler и fault handlers; fault-injection входа в fault handlers еще не выполнен) |
+| Flash safety | РЕАЛИЗОВАНО И ПРОВЕРЕНО (config page `0x0800FC00` исключена из linker region; `COMMIT -> REBOOT -> GET_INFO` PASS) |
+| Физическая нагрузка | ЧАСТИЧНО ПРОВЕРЕНО (каналы 0 и 1, индивидуально и совместно, 3 цикла) |
 
 ## 6. Реестр логических устройств (Device Registry)
 (Локальные индексы 0-15, маппинг динамический)
@@ -178,7 +278,7 @@ ip link set can0 type can bitrate 1000000 sample-point 0.750 restart-ms 100 loop
 - **Zero-Hardware**: Не требует пинов или аппаратных таймеров.
 
 ### 9.2. Алгоритм работы
-1. **Активация**: При каждой команде `START` или `RUN_DURATION` запускается/перезапускается таймер канала.
+1. **Активация**: При каждой команде `START` или `RUN_DURATION` сначала запускается/перезапускается таймер канала, затем включается GPIO.
 2. **Таймауты по умолчанию**: Насосы — 60с, Клапаны — 300с.
 3. **Авто-выключение**: По истечении времени вызывается `AutoOff_Callback`, сбрасывающий GPIO.
 4. **Остановка**: При команде `STOP` таймер останавливается штатно.
@@ -186,9 +286,12 @@ ip link set can0 type can bitrate 1000000 sample-point 0.750 restart-ms 100 loop
 ### 9.3. Транзакционная логика
 - При штатной остановке отправляется `DONE`.
 - При аварийном срабатывании `DONE` не отправляется.
+- Если safety timer не может быть запущен, нагрузка не включается, отправляется `NACK 0x0003`, `DONE` не отправляется.
 
 ---
 
-**Текущий статус**: "Fluidics Executor CAN transport verified at 1 Mbit/s. Ready for extended channel verification."
+**Текущий статус**: "Fluidics Executor CAN transport, channels 0/1 physical load, NACK matrix, addressing, read-only service, persistence, reboot, factory reset, transport negative behavior, non-zero timeout, RUN_DURATION, safety timer start guard, safe-state hook, and Flash config page reservation verified at 1 Mbit/s through passive CAN switch. Ready for extended channel, CAN diagnostics, IWDG, and controlled fault-injection verification."
 
-*Документ обновлён: 17.04.2026*
+**Industrialization note to Conductor**: `PUMP_START` с ненулевым timeout и `RUN_DURATION (0x0201)` проверены. Дирижер может использовать `RUN_DURATION` для timed-run сценариев с ненулевым timeout; `DONE` подтверждает старт GPIO/таймера, а последующее автоотключение отдельным `DONE` не подтверждается. Если executor не смог запустить safety timer, он отвечает `NACK 0x0003` без `DONE`, а нагрузка остается выключенной.
+
+*Документ обновлён: 20.04.2026*

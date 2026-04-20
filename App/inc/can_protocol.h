@@ -80,6 +80,7 @@
 // Магические ключи для опасных операций
 #define SRV_MAGIC_REBOOT                0x55AA  // Ключ для Reboot
 #define SRV_MAGIC_FACTORY_RESET         0xDEAD  // Ключ для Factory Reset
+#define CAN_CMD_SRV_GET_STATUS          0xF007  // Получить диагностический статус
 
 
 
@@ -92,6 +93,34 @@
 #define CAN_ERR_DEVICE_BUSY         0x0003
 #define CAN_ERR_INVALID_KEY         0x0004
 #define CAN_ERR_FLASH_WRITE         0x0005
+
+
+// ============================================================
+// Метрики GET_STATUS (0xF007): metric_id:uint16 LE + value:uint32 LE
+// ============================================================
+#define CAN_STATUS_RX_TOTAL             0x0001
+#define CAN_STATUS_TX_TOTAL             0x0002
+#define CAN_STATUS_RX_QUEUE_OVERFLOW    0x0003
+#define CAN_STATUS_TX_QUEUE_OVERFLOW    0x0004
+#define CAN_STATUS_DISPATCHER_OVERFLOW  0x0005
+#define CAN_STATUS_DROP_NOT_EXT         0x0006
+#define CAN_STATUS_DROP_WRONG_DST       0x0007
+#define CAN_STATUS_DROP_WRONG_TYPE      0x0008
+#define CAN_STATUS_DROP_WRONG_DLC       0x0009
+#define CAN_STATUS_TX_MAILBOX_TIMEOUT   0x000A
+#define CAN_STATUS_TX_HAL_ERROR         0x000B
+#define CAN_STATUS_ERROR_CALLBACK       0x000C
+#define CAN_STATUS_ERROR_WARNING        0x000D
+#define CAN_STATUS_ERROR_PASSIVE        0x000E
+#define CAN_STATUS_BUS_OFF              0x000F
+#define CAN_STATUS_LAST_HAL_ERROR       0x0010
+#define CAN_STATUS_LAST_ESR             0x0011
+#define CAN_STATUS_APP_QUEUE_OVERFLOW   0x0012
+
+
+
+
+
 
 // ============================================================
 // Макрос построения 29-bit CAN ID

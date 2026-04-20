@@ -28,6 +28,7 @@
 #include "task_can_handler.h"
 #include "task_pump_controller.h"
 #include "tasks/task_dispatcher.h"
+#include "pumps_valves_gpio.h"
 
 /* USER CODE END Includes */
 
@@ -126,7 +127,10 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN_Init();
+
   /* USER CODE BEGIN 2 */
+  PumpsValves_AllOff();
+
   // Создание очередей FreeRTOS с использованием именованных констант
   can_rx_queueHandle = osMessageQueueNew(CAN_RX_QUEUE_LEN, sizeof(CanRxFrame_t), NULL);
   can_tx_queueHandle = osMessageQueueNew(CAN_TX_QUEUE_LEN, sizeof(CanTxFrame_t), NULL);
@@ -419,10 +423,12 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+	PumpsValves_AllOff();
+	__disable_irq();
+	while (1)
+		{
+		}
+
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT

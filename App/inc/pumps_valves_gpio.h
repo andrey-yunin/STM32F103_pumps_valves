@@ -35,6 +35,12 @@ void PumpsValves_SetPumpState(uint8_t pump_idx, bool is_on);
  */
 void PumpsValves_SetValveState(uint8_t valve_idx, bool is_open);
 
+/**
+ * Переводит все насосы и клапаны в безопасное состояние OFF.
+ */
+void PumpsValves_AllOff(void);
+
+
 
 
 #endif /* PUMPS_VALVES_GPIO_H_ */

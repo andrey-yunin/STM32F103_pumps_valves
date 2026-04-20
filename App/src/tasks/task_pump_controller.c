@@ -83,28 +83,38 @@ void app_start_task_pump_controller(void *argument)
 		uint8_t timer_idx = (cmd.device_type == DEVICE_TYPE_PUMP) ? cmd.physical_id : (cmd.physical_id + NUM_PUMPS);
 
 		// 3. Исполнение: управление GPIO и таймерами
+
 		if (cmd.state) {
 			// --- ВКЛЮЧЕНИЕ ---
-		    if (cmd.device_type == DEVICE_TYPE_PUMP) {
-		    	PumpsValves_SetPumpState(cmd.physical_id, true);
-		    	}
-		    else
-		    {
-		    	PumpsValves_SetValveState(cmd.physical_id, true);
-		    	}
+			uint32_t timeout = cmd.timeout_ms;
+			if (timeout == 0){
+				timeout = (cmd.device_type == DEVICE_TYPE_PUMP) ? DEFAULT_PUMP_TIMEOUT_MS : DEFAULT_VALVE_TIMEOUT_MS;
+				}
 
-		    // Расчет таймаута
-		    uint32_t timeout = cmd.timeout_ms;
-		    if (timeout == 0)
-		    {
-		    	timeout = (cmd.device_type == DEVICE_TYPE_PUMP) ? DEFAULT_PUMP_TIMEOUT_MS : DEFAULT_VALVE_TIMEOUT_MS;
-		    	}
+			/*
+		  	* Safety rule:
+		  	* Do not energize a load unless its protection timer is active.
+		  	*/
+			if (fluidic_timers[timer_idx] == NULL ||
+					osTimerStart(fluidic_timers[timer_idx], timeout) != osOK){
+				if (cmd.device_type == DEVICE_TYPE_PUMP) {
+					PumpsValves_SetPumpState(cmd.physical_id, false);
+					}
+				else {
+					PumpsValves_SetValveState(cmd.physical_id, false);
+					}
 
-		    // Запуск/Перезапуск таймера
-		    if (fluidic_timers[timer_idx] != NULL) {
-		    	osTimerStart(fluidic_timers[timer_idx], timeout);
-		    	}
-		    }
+				CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_DEVICE_BUSY);
+				continue;
+				}
+
+			if (cmd.device_type == DEVICE_TYPE_PUMP) {
+				PumpsValves_SetPumpState(cmd.physical_id, true);
+				}
+			else {
+				PumpsValves_SetValveState(cmd.physical_id, true);
+				}
+			}
 
 		else
 		{
