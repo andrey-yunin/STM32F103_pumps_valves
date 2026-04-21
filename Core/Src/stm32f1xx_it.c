@@ -27,7 +27,7 @@
 #include "app_queues.h" // Для can_rx_queueHandle
 #include "app_config.h" // Чтобы видеть CanFrame_t
 #include "pumps_valves_gpio.h"
-
+#include "task_can_handler.h"
 
 
 
@@ -62,9 +62,17 @@
 /* USER CODE BEGIN 0 */
 static void EnterSafeFaultState(void)
 {
+	/*
+	 * Fault handlers must not depend on FreeRTOS, CAN queues or dynamic memory.
+	 * Stop interrupts first, then force all outputs to the domain safe state.
+	 * The active IWDG is intentionally not refreshed here, so a hardware reset
+	 * follows after the watchdog timeout.
+	 */
+	__disable_irq();
 	PumpsValves_AllOff();
-  	__disable_irq();
-  }
+	__DSB();
+	__ISB();
+}
 
 
 /* USER CODE END 0 */
@@ -223,18 +231,49 @@ void TIM4_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-// Callback-функция, вызываемая, когда в FIFO0 CAN1 появляется новое сообщение
+// Callback вызывается HAL, когда в CAN FIFO0 появился новый принятый фрейм.
+//
+// В ISR нельзя долго работать и нельзя выполнять прикладную логику.
+// Поэтому здесь только быстро забираем фрейм из аппаратного FIFO,
+// кладем его в RTOS-очередь и будим задачу CAN handler.
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
 	CanRxFrame_t rx_frame;
-	// Извлекаем сообщение из аппаратного буфера CAN FIFO0
+
 	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_frame.header, rx_frame.data) == HAL_OK)
 		{
-		// Помещаем фрейм в очередь и сигнализируем задаче CAN Handler
-		osMessageQueuePut(can_rx_queueHandle, &rx_frame, 0, 0);
-		osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_RX);
+		// Если очередь заполнена, фрейм теряется на транспортном уровне.
+		// NACK отсюда отправлять нельзя: мы в ISR, плюс команда еще не разобрана.
+		// Дирижер увидит timeout ACK и потом сможет запросить GET_STATUS.
+		if (osMessageQueuePut(can_rx_queueHandle, &rx_frame, 0, 0) == osOK)
+			{
+			osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_RX);
+			}
+		else
+			{
+			CAN_Diagnostics_RecordRxQueueOverflow();
+			}
 		}
-	}
+}
 
+// IRQ для CAN status/error line.
+//
+// Этот обработчик нужен для CAN_IT_ERROR_WARNING, CAN_IT_ERROR_PASSIVE,
+// CAN_IT_BUSOFF, CAN_IT_LAST_ERROR_CODE и CAN_IT_ERROR.
+// Без него HAL_CAN_ErrorCallback() может не вызываться.
+void CAN1_SCE_IRQHandler(void)
+{
+	HAL_CAN_IRQHandler(&hcan);
+}
+
+// Callback CAN-ошибок.
+//
+// Здесь мы не лечим шину и не перезапускаем CAN вручную.
+// restart-ms на стороне SocketCAN и auto-recovery bxCAN живут отдельно.
+// Наша задача: зафиксировать состояние, чтобы Дирижер видел деградацию.
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
+{
+	CAN_Diagnostics_RecordCanError(HAL_CAN_GetError(hcan), hcan->Instance->ESR);
+}
 
 /* USER CODE END 1 */

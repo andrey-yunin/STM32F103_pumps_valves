@@ -50,6 +50,41 @@
 #define DEFAULT_PUMP_TIMEOUT_MS     60000   // 60 секунд
 #define DEFAULT_VALVE_TIMEOUT_MS    300000  // 5 минут (300 секунд)
 
+// =============================================================================
+//                     ВРЕМЕННЫЕ ТЕСТЫ ОТКАЗОВ / FAULT INJECTION
+// =============================================================================
+//
+// Используется только для приемочного теста safety timer.
+// В штатной прошивке должно быть 0.
+//
+// Когда FLUIDICS_TEST_FORCE_TIMER_START_FAIL = 1, контроллер делает вид,
+// что safety timer для указанного канала не стартовал. Нагрузка при этом
+// не должна включиться, а Дирижер должен получить NACK DEVICE_BUSY без DONE.
+#define FLUIDICS_TEST_FORCE_TIMER_START_FAIL   0
+#define FLUIDICS_TEST_FAIL_DEVICE_ID           0
+
+//
+// Используется только для приемочного теста IWDG supervisor.
+// В штатной прошивке должно быть 0.
+//
+// Когда APP_WATCHDOG_TEST_STALL_FLUIDICS_AFTER_ON = 1, Fluidics-задача
+// намеренно зависает после включения указанного logical device_id.
+// Ожидаемое поведение: supervisor выключает все выходы, перестает кормить
+// IWDG, затем плата уходит в аппаратный reset.
+#define APP_WATCHDOG_TEST_STALL_FLUIDICS_AFTER_ON   0
+#define APP_WATCHDOG_TEST_STALL_DEVICE_ID           0
+
+//
+// Используется только для приемочного теста fault handlers.
+// В штатной прошивке должно быть 0.
+//
+// Когда APP_FAULT_HANDLER_TEST_TRIGGER_AFTER_ON = 1, Fluidics-задача после
+// включения указанного logical device_id входит в HardFault_Handler() до
+// отправки DONE. Ожидаемое поведение: fault handler выключает все выходы,
+// IWDG не кормится, затем плата уходит в аппаратный reset.
+#define APP_FAULT_HANDLER_TEST_TRIGGER_AFTER_ON      0
+#define APP_FAULT_HANDLER_TEST_DEVICE_ID             0
+
 
 
 // =============================================================================

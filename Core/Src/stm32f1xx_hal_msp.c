@@ -121,6 +121,10 @@ void HAL_CAN_MspInit(CAN_HandleTypeDef* hcan)
     HAL_NVIC_SetPriority(CAN1_RX1_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(CAN1_RX1_IRQn);
     /* USER CODE BEGIN CAN1_MspInit 1 */
+    // CAN SCE interrupt: status change / error line.
+    // Нужен для подсчета ERROR_WARNING, ERROR_PASSIVE, BUS_OFF и HAL CAN errors.
+    HAL_NVIC_SetPriority(CAN1_SCE_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(CAN1_SCE_IRQn);
 
     /* USER CODE END CAN1_MspInit 1 */
 
@@ -154,6 +158,8 @@ void HAL_CAN_MspDeInit(CAN_HandleTypeDef* hcan)
     HAL_NVIC_DisableIRQ(USB_LP_CAN1_RX0_IRQn);
     HAL_NVIC_DisableIRQ(CAN1_RX1_IRQn);
     /* USER CODE BEGIN CAN1_MspDeInit 1 */
+
+    HAL_NVIC_DisableIRQ(CAN1_SCE_IRQn);
 
     /* USER CODE END CAN1_MspDeInit 1 */
   }

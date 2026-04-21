@@ -1,68 +1,105 @@
-# 🧬 DDS-240 Fluidic Executor (Pump & Valve Controller)
+# DDS-240 Fluidics Executor (Pump & Valve Controller)
 
 ![Platform: STM32F103](https://img.shields.io/badge/Platform-STM32F103C8T6-blue)
 ![RTOS: FreeRTOS](https://img.shields.io/badge/RTOS-FreeRTOS%20v10.3-green)
 ![Standard: DDS--240](https://img.shields.io/badge/Standard-DDS--240%20Compliant-orange)
 ![Directive: 2.0](https://img.shields.io/badge/Directive-2.0%20(Strict%20DLC=8)-red)
 
-Firmware for the Fluidic Execution Unit of the **DDS-240** Biochemical Analyzer. This module manages 13 pumps and 3 valves, providing high-precision timing and a multi-level safety system.
+Firmware for the Fluidics Executor of the **DDS-240** ecosystem. The board controls 13 pumps and 3 valves over CAN and implements the industrial executor pattern validated on STM32F103: strict CAN transport, service diagnostics, RTOS resource checks, safe-state handling and IWDG supervision.
 
 ---
 
-## 🚀 Key Features
+## Current Status
 
-- **Directive 2.0 Ready**: Strict transport unification (DLC=8) and 0-based resource indexing.
-- **Safety First Architecture**: Built-in hardware and software Safety Timeouts to prevent overflows and hardware damage.
-- **Advanced Service Layer**: Remote diagnostics, MCU UID retrieval, software reboot, and factory reset via CAN bus.
-- **Flexible Mapping**: Software-defined mapping of logical channels to physical GPIO pins via non-volatile Flash configuration.
-- **Deterministic Bus Handling**: Robust bxCAN (1 Mbps) implementation with Mailbox Guard protection.
+Industrial safety/CAN/RTOS validation is closed for the reference Fluidics channel 0.
+
+Verified:
+
+- CANable / SocketCAN at `1 Mbit/s`.
+- CAN-switch operation with passive termination.
+- Strict `DLC=8`, 29-bit Extended ID, broadcast and foreign destination behavior.
+- `GET_DEVICE_INFO`, `GET_UID`, `GET_STATUS`.
+- `SET_NODE_ID`, `COMMIT`, `REBOOT`, `FACTORY_RESET`.
+- `PUMP_START`, `PUMP_STOP`, `RUN_DURATION`, non-zero timeout parsing.
+- Safety timer guard and safety timer fault-injection.
+- RTOS resource checks and FreeRTOS heap baseline `8192`.
+- bxCAN TX ordering with `TransmitFifoPriority = ENABLE`.
+- IWDG supervisor normal idle and fault-injection recovery.
+- Fault handler safe-state and final production smoke-test after all test flags returned to `0`.
+
+Remaining physical acceptance items:
+
+- Full physical pass for pumps `2..12`.
+- Valve channels `13..15`.
+- Default safety timeout for valves.
 
 ---
 
-## 🛠 Hardware Specifications
+## Hardware
 
 | Parameter | Value |
 |:---------|:---------|
 | **MCU**  | STM32F103C8T6 (64KB Flash, 20KB RAM) |
 | **Clock**| 64 MHz (PLL from HSI) |
-| **CAN**  | bxCAN, 1 Mbps, 29-bit Extended ID |
+| **CAN**  | bxCAN, 1 Mbit/s, 29-bit Extended ID |
 | **GPIO** | 16 High-Speed Outputs (Pumps 0-12, Valves 13-15) |
 
 ---
 
-## 📡 Control Protocol (CAN ID Map)
+## CAN Protocol
 
-The system operates on a **Resource-Based Model**. Each board has a default `NodeID = 0x30` (configurable).
+Default Fluidics `NodeID = 0x30` and Conductor `NodeID = 0x10`.
 
 | Component | Local Indices (ch_idx) | Supported Commands |
 |:----------|:---------------------------|:--------|
 | **Pumps** | `0 - 12`                   | `RUN_DURATION (0x0201)`, `START (0x0202)`, `STOP (0x0203)` |
 | **Valves**| `13 - 15`                  | `OPEN (0x0204)`, `CLOSE (0x0205)` |
 
-> **Important:** All commands require **DLC=8**. Parameters (e.g., Timeout in ms) must be passed in bytes 3-6 (Little-Endian).
+Rules:
+
+- `Conductor <-> Executor` always uses strict `DLC=8`.
+- `Host -> Conductor` may still use command-specific dynamic DLC.
+- Command payload is little-endian.
+- Fluidics timeout is `uint32_t LE` in payload bytes `3..6`.
+- `DONE` confirms an atomic action, not the end of a recipe interval.
 
 ---
 
-## 📂 Documentation Structure
+## Documentation
 
-Detailed documentation is available in the `readme/` directory:
+Primary ecosystem documentation:
 
-- 📘 [Conductor Integration Guide](readme/CONDUCTOR_INTEGRATION_GUIDE.md) — Command API and transaction diagrams.
-- 📜 [Executor Report](readme/PUMPS_VALVES_EXECUTOR_REPORT.md) — GPIO pinout, memory map, and version history.
-- ✅ [CAN Verification Report](readme/CAN_VERIFICATION_REPORT_20260417.md) — CANable validation at 1 Mbps.
-- ⚡ [Refactoring Plan](readme/refactoring_plan.md) — Current status and development history.
-- 🏗 [Ecosystem Pattern](readme/pattern/) — Reference implementation and ecosystem standards.
+- [DDS-240 Ecosystem Standard](readme/DDS-240_eko_system/DDS-240_ECOSYSTEM_STANDARD.md)
+- [Conductor Integration Guide](readme/DDS-240_eko_system/CONDUCTOR_INTEGRATION_GUIDE.md)
+- [Executor Industrialization Playbook](readme/DDS-240_eko_system/EXECUTOR_INDUSTRIALIZATION_PLAYBOOK.md)
+- [Global Ecosystem Config](readme/DDS-240_eko_system/dds240_global_config.h)
+- [Executor Testing Guide](readme/DDS-240_eko_system/EXECUTOR_TESTING_GUIDE.md)
+
+Local Linux/CAN test helper:
+
+- [can_fluidics_test.sh](App_users/can_fluidics_test.sh)
 
 ---
 
-## 🔨 Build & Flash
+## Build And Test
 
 Developed using **STM32CubeIDE 1.19.0**.
 
 1. Clone the repository.
 2. Import the project into STM32CubeIDE.
-3. Configure CAN parameters (if needed) in `App/inc/can_protocol.h`.
-4. Build the project and flash via ST-Link.
+3. Build the project.
+4. Flash via ST-Link.
+5. Configure SocketCAN and run the production smoke-test:
+
+```bash
+./App_users/can_fluidics_test.sh setup
+./App_users/can_fluidics_test.sh info
+./App_users/can_fluidics_test.sh pump-cycle 0 1
+sleep 10
+./App_users/can_fluidics_test.sh info
+```
+
+Expected result: `ACK/DONE` for domain commands and `ACK -> DATA -> DONE` for `GET_DEVICE_INFO`.
 
 ---
 © 2026 DDS-240 Ecosystem | Senior Embedded Engineering Team

@@ -17,7 +17,12 @@
 #include "app_config.h"
 #include "can_protocol.h"
 #include "device_mapping.h"
+#include "app_watchdog.h"
 #include "pumps_valves_gpio.h"
+
+#if (APP_FAULT_HANDLER_TEST_TRIGGER_AFTER_ON != 0)
+#include "stm32f1xx_it.h"
+#endif
 
 
 // --- Локальные переменные ---
@@ -65,19 +70,92 @@ static void Init_FluidicTimers(void)
 		}
 }
 
+/**
+ * @brief Тестовый хук для имитации отказа запуска safety timer.
+ *
+ * Нужен только для приемочного теста:
+ * если protection timer не стартовал, выход не должен включаться.
+ *
+ * В production-сборке FLUIDICS_TEST_FORCE_TIMER_START_FAIL должен быть 0,
+ * тогда функция всегда возвращает false и не влияет на поведение.
+ */
+static bool IsSafetyTimerFaultInjected(const PumpValveCommand_t *cmd)
+{
+#if (FLUIDICS_TEST_FORCE_TIMER_START_FAIL != 0)
+	return (cmd->device_id == FLUIDICS_TEST_FAIL_DEVICE_ID);
+#else
+	(void)cmd;
+	return false;
+#endif
+}
+
+/**
+ * @brief Тестовый хук для проверки IWDG supervisor.
+ *
+ * Хук нужен только для приемочного теста watchdog:
+ * нагрузка уже включена, после чего Fluidics-задача перестает делать heartbeat.
+ * Supervisor должен увидеть, что один из клиентов не продвигается, выключить
+ * все выходы через PumpsValves_AllOff() и прекратить refresh аппаратного IWDG.
+ *
+ * В production-сборке APP_WATCHDOG_TEST_STALL_FLUIDICS_AFTER_ON должен быть 0,
+ * тогда функция компилируется в пустую проверку и не влияет на выполнение.
+ */
+static void AppWatchdogTest_StallFluidicsAfterOn(const PumpValveCommand_t *cmd)
+{
+#if (APP_WATCHDOG_TEST_STALL_FLUIDICS_AFTER_ON != 0)
+	if (cmd->state && cmd->device_id == APP_WATCHDOG_TEST_STALL_DEVICE_ID) {
+		for (;;) {
+			/*
+			 * Намеренно не вызываем AppWatchdog_Heartbeat().
+			 * osDelay() оставляет scheduler живым, поэтому supervisor-задача
+			 * успевает выполнить safe-state перед аппаратным reset.
+			 */
+			osDelay(APP_WATCHDOG_TASK_IDLE_TIMEOUT_MS);
+			}
+		}
+#else
+	(void)cmd;
+#endif
+}
+
+/**
+ * @brief Тестовый хук для проверки fault handler safe-state.
+ *
+ * Хук нужен только для приемочного теста:
+ * нагрузка уже включена, после чего задача напрямую входит в HardFault_Handler().
+ * Это проверяет тот же аварийный путь, который используется при реальном
+ * HardFault: safe-state, отсутствие DONE и последующий IWDG reset.
+ *
+ * В production-сборке APP_FAULT_HANDLER_TEST_TRIGGER_AFTER_ON должен быть 0.
+ */
+static void AppFaultHandlerTest_TriggerAfterOn(const PumpValveCommand_t *cmd)
+{
+#if (APP_FAULT_HANDLER_TEST_TRIGGER_AFTER_ON != 0)
+	if (cmd->state && cmd->device_id == APP_FAULT_HANDLER_TEST_DEVICE_ID) {
+		HardFault_Handler();
+		}
+#else
+	(void)cmd;
+#endif
+}
+
 void app_start_task_pump_controller(void *argument)
 {
 	PumpValveCommand_t cmd;
 
 	// 1. Инициализация таймеров перед входом в цикл
 	Init_FluidicTimers();
+	AppWatchdog_Heartbeat(APP_WDG_CLIENT_FLUIDICS);
 
 	for (;;)
 		{
 		// 2. Ждём доменную команду от Dispatcher
-		if (osMessageQueueGet(fluidics_queueHandle, &cmd, NULL, osWaitForever) != osOK) {
+		AppWatchdog_Heartbeat(APP_WDG_CLIENT_FLUIDICS);
+		if (osMessageQueueGet(fluidics_queueHandle, &cmd, NULL,
+				APP_WATCHDOG_TASK_IDLE_TIMEOUT_MS) != osOK) {
 			continue;
 			}
+		AppWatchdog_Heartbeat(APP_WDG_CLIENT_FLUIDICS);
 
 		// Вычисляем индекс в глобальном массиве таймеров (0..15)
 		uint8_t timer_idx = (cmd.device_type == DEVICE_TYPE_PUMP) ? cmd.physical_id : (cmd.physical_id + NUM_PUMPS);
@@ -92,11 +170,18 @@ void app_start_task_pump_controller(void *argument)
 				}
 
 			/*
-		  	* Safety rule:
-		  	* Do not energize a load unless its protection timer is active.
-		  	*/
-			if (fluidic_timers[timer_idx] == NULL ||
-					osTimerStart(fluidic_timers[timer_idx], timeout) != osOK){
+			 * Safety rule:
+			 * Нагрузку разрешено включать только после успешного старта
+			 * защитного таймера. Если таймер не создан, не стартовал или
+			 * тестовый fault-injection имитирует отказ, выход оставляем OFF.
+			 */
+			osStatus_t timer_status = osError;
+
+			if (!IsSafetyTimerFaultInjected(&cmd) && fluidic_timers[timer_idx] != NULL) {
+				timer_status = osTimerStart(fluidic_timers[timer_idx], timeout);
+				}
+
+			if (timer_status != osOK){
 				if (cmd.device_type == DEVICE_TYPE_PUMP) {
 					PumpsValves_SetPumpState(cmd.physical_id, false);
 					}
@@ -114,6 +199,9 @@ void app_start_task_pump_controller(void *argument)
 			else {
 				PumpsValves_SetValveState(cmd.physical_id, true);
 				}
+
+			AppFaultHandlerTest_TriggerAfterOn(&cmd);
+			AppWatchdogTest_StallFluidicsAfterOn(&cmd);
 			}
 
 		else
@@ -137,6 +225,3 @@ void app_start_task_pump_controller(void *argument)
 		CAN_SendDone(cmd.cmd_code, cmd.device_id);
 		}
 }
-
-
-

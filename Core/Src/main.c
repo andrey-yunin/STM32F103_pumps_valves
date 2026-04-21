@@ -28,6 +28,7 @@
 #include "task_can_handler.h"
 #include "task_pump_controller.h"
 #include "tasks/task_dispatcher.h"
+#include "tasks/task_watchdog.h"
 #include "pumps_valves_gpio.h"
 
 /* USER CODE END Includes */
@@ -50,6 +51,8 @@
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan;
 
+IWDG_HandleTypeDef hiwdg;
+
 /* Definitions for task_can_handle */
 osThreadId_t task_can_handleHandle;
 const osThreadAttr_t task_can_handle_attributes = {
@@ -71,6 +74,13 @@ const osThreadAttr_t task_pump_contr_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for task_watchdog */
+osThreadId_t task_watchdogHandle;
+const osThreadAttr_t task_watchdog_attributes = {
+  .name = "task_watchdog",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
 /* USER CODE BEGIN PV */
 
 osMessageQueueId_t can_rx_queueHandle;
@@ -84,9 +94,11 @@ osMessageQueueId_t fluidics_queueHandle;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
+static void MX_IWDG_Init(void);
 void start_task_can_handler(void *argument);
 void start_task_dispatcher(void *argument);
 void start_task_pump_controller(void *argument);
+void start_task_watchdog(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -127,7 +139,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN_Init();
-
+  MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
   PumpsValves_AllOff();
 
@@ -174,8 +186,16 @@ int main(void)
   /* creation of task_pump_contr */
   task_pump_contrHandle = osThreadNew(start_task_pump_controller, NULL, &task_pump_contr_attributes);
 
+  /* creation of task_watchdog */
+  task_watchdogHandle = osThreadNew(start_task_watchdog, NULL, &task_watchdog_attributes);
+
   /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+  if (task_can_handleHandle == NULL ||
+      task_dispatcherHandle == NULL ||
+      task_pump_contrHandle == NULL ||
+      task_watchdogHandle == NULL) {
+    Error_Handler();
+  }
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -210,9 +230,10 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI_DIV2;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL16;
@@ -262,7 +283,7 @@ static void MX_CAN_Init(void)
   hcan.Init.AutoWakeUp = DISABLE;
   hcan.Init.AutoRetransmission = DISABLE;
   hcan.Init.ReceiveFifoLocked = DISABLE;
-  hcan.Init.TransmitFifoPriority = DISABLE;
+  hcan.Init.TransmitFifoPriority = ENABLE;
   if (HAL_CAN_Init(&hcan) != HAL_OK)
   {
     Error_Handler();
@@ -270,6 +291,34 @@ static void MX_CAN_Init(void)
   /* USER CODE BEGIN CAN_Init 2 */
 
   /* USER CODE END CAN_Init 2 */
+
+}
+
+/**
+  * @brief IWDG Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_IWDG_Init(void)
+{
+
+  /* USER CODE BEGIN IWDG_Init 0 */
+
+  /* USER CODE END IWDG_Init 0 */
+
+  /* USER CODE BEGIN IWDG_Init 1 */
+
+  /* USER CODE END IWDG_Init 1 */
+  hiwdg.Instance = IWDG;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_256;
+  hiwdg.Init.Reload = 624;
+  if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN IWDG_Init 2 */
+
+  /* USER CODE END IWDG_Init 2 */
 
 }
 
@@ -391,6 +440,26 @@ void start_task_pump_controller(void *argument)
     osDelay(1);
   }
   /* USER CODE END start_task_pump_controller */
+}
+
+/* USER CODE BEGIN Header_start_task_watchdog */
+/**
+* @brief Function implementing the task_watchdog thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_start_task_watchdog */
+void start_task_watchdog(void *argument)
+{
+  /* USER CODE BEGIN start_task_watchdog */
+  app_start_task_watchdog(argument);
+
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END start_task_watchdog */
 }
 
 /**

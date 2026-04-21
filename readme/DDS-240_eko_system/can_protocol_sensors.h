@@ -54,6 +54,43 @@
 #define CAN_CMD_SENSOR_GET_ALL_TEMPS  0x9010 // Запрос всех датчиков
 
 // ============================================================
+// Сервисные команды (0xF001 - 0xF00F)
+// ============================================================
+#define CAN_CMD_SRV_GET_DEVICE_INFO     0xF001  // Получить тип и версию
+#define CAN_CMD_SRV_REBOOT              0xF002  // Перезагрузка
+#define CAN_CMD_SRV_FLASH_COMMIT        0xF003  // Сохранить настройки в Flash
+#define CAN_CMD_SRV_GET_UID             0xF004  // Получить Unique ID
+#define CAN_CMD_SRV_SET_NODE_ID         0xF005  // Установить новый CAN NodeID
+#define CAN_CMD_SRV_FACTORY_RESET       0xF006  // Сброс к заводским настройкам
+#define CAN_CMD_SRV_GET_STATUS          0xF007  // Получить диагностический статус
+
+// ============================================================
+// Метрики GET_STATUS (0xF007): metric_id:uint16 LE + value:uint32 LE
+// ============================================================
+#define CAN_STATUS_RX_TOTAL             0x0001
+#define CAN_STATUS_TX_TOTAL             0x0002
+#define CAN_STATUS_RX_QUEUE_OVERFLOW    0x0003
+#define CAN_STATUS_TX_QUEUE_OVERFLOW    0x0004
+#define CAN_STATUS_DISPATCHER_OVERFLOW  0x0005
+#define CAN_STATUS_DROP_NOT_EXT         0x0006
+#define CAN_STATUS_DROP_WRONG_DST       0x0007
+#define CAN_STATUS_DROP_WRONG_TYPE      0x0008
+#define CAN_STATUS_DROP_WRONG_DLC       0x0009
+#define CAN_STATUS_TX_MAILBOX_TIMEOUT   0x000A
+#define CAN_STATUS_TX_HAL_ERROR         0x000B
+#define CAN_STATUS_ERROR_CALLBACK       0x000C
+#define CAN_STATUS_ERROR_WARNING        0x000D
+#define CAN_STATUS_ERROR_PASSIVE        0x000E
+#define CAN_STATUS_BUS_OFF              0x000F
+#define CAN_STATUS_LAST_HAL_ERROR       0x0010
+#define CAN_STATUS_LAST_ESR             0x0011
+#define CAN_STATUS_APP_QUEUE_OVERFLOW   0x0012
+
+// Магические ключи для опасных операций
+#define SRV_MAGIC_REBOOT                0x55AA
+#define SRV_MAGIC_FACTORY_RESET         0xDEAD
+
+// ============================================================
 // Макрос построения 29-bit Extended CAN ID
 // ============================================================
 #define CAN_BUILD_ID(priority, msg_type, dst_addr, src_addr) \
